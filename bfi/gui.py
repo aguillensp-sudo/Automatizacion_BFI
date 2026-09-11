@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 from . import APP_NAME, __version__, config
 from .dialogo_credenciales import faltantes, pedir_credenciales
 from .extractor import listar_pdfs, procesar_pdfs
-from .logging_setup import ManejadorInterfaz, configurar_logger
+from .logging_setup import conectar_a_ventana, configurar_logger
 from .mapping import ErrorDeMapeo, agrupar_por_tabla, leer_csv
 from .ninox_client import NinoxClient
 from .ninox_writer import EscritorNinox, ResultadoProceso
@@ -44,7 +44,7 @@ class AplicacionBFI(ttk.Frame):
         self.rowconfigure(4, weight=1)
 
         self.logger = configurar_logger(consola=False)
-        self.logger.addHandler(ManejadorInterfaz(self._encolar_log))
+        conectar_a_ventana(self._encolar_log)
 
         self._cola: "queue.Queue[tuple]" = queue.Queue()
         self._hilo: Optional[threading.Thread] = None

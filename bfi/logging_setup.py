@@ -48,28 +48,54 @@ def carpeta_logs() -> Path:
 
 def configurar_logger(nombre: str = "bfi", nivel: int = logging.INFO,
                       consola: bool = False) -> logging.Logger:
-    """Configura y devuelve el logger de la aplicacion (idempotente)."""
+    """Configura el registro a fichero (y a consola) del logger de la aplicacion.
+
+    Es **idempotente por tipo de manejador**, y eso importa: antes esta funcion
+    devolvia el logger en cuanto tuviera *cualquier* manejador, asi que si algo
+    ya habia configurado el registro (la linea de comandos, o una prueba
+    anterior), el manejador que envia las lineas a la ventana no se llegaba a
+    conectar y **la caja de registro de la interfaz se quedaba vacia**.
+    """
     logger = logging.getLogger(nombre)
-    if logger.handlers:
-        return logger
     logger.setLevel(nivel)
     logger.propagate = False
-
+    marcas = {getattr(h, "_bfi_tipo", None) for h in logger.handlers}
     formato = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s",
                                 datefmt="%Y-%m-%d %H:%M:%S")
 
-    ruta = carpeta_logs() / ("bfi_%s.log" % datetime.now().strftime("%Y%m%d"))
-    try:
-        fh = logging.FileHandler(ruta, encoding="utf-8")
-        fh.setFormatter(formato)
-        logger.addHandler(fh)
-    except OSError:
-        pass
+    if "fichero" not in marcas:
+        ruta = carpeta_logs() / ("bfi_%s.log" % datetime.now().strftime("%Y%m%d"))
+        try:
+            fh = logging.FileHandler(ruta, encoding="utf-8")
+            fh.setFormatter(formato)
+            fh._bfi_tipo = "fichero"
+            logger.addHandler(fh)
+        except OSError:
+            pass
 
-    if consola and getattr(sys, "stderr", None) is not None:
+    if consola and "consola" not in marcas and getattr(sys, "stderr", None) is not None:
         sh = logging.StreamHandler(sys.stderr)
         sh.setFormatter(formato)
+        sh._bfi_tipo = "consola"
         logger.addHandler(sh)
+
+    return logger
+
+
+def conectar_a_ventana(destino, nombre: str = "bfi") -> logging.Logger:
+    """Conecta la caja de registro de la ventana al logger de la aplicacion.
+
+    Se puede llamar aunque el registro ya este configurado: retira el manejador
+    de interfaz anterior, si lo hubiera, para que nunca queden dos ventanas
+    recibiendo las mismas lineas.
+    """
+    logger = logging.getLogger(nombre)
+    for handler in list(logger.handlers):
+        if getattr(handler, "_bfi_tipo", None) == "ventana":
+            logger.removeHandler(handler)
+    ui = ManejadorInterfaz(destino)
+    ui._bfi_tipo = "ventana"
+    logger.addHandler(ui)
     return logger
 
 
