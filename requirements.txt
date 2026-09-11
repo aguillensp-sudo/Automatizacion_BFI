@@ -1,0 +1,11 @@
+# Dependencias de la aplicacion BFI.
+#
+# Solo hay UNA dependencia externa. El cliente HTTP de Ninox usa urllib de la
+# biblioteca estandar a proposito: menos paquetes = un .exe mas pequeno, un
+# instalador mas rapido y menos cosas que puedan fallar en el portatil del
+# usuario final. (El proyecto hermano "Automatizacion JI" sigue el mismo
+# criterio y por eso su .exe se empaqueta sin problemas.)
+pdfplumber>=0.11.0
+
+# Solo para el desarrollo y el empaquetado (no van dentro del instalador final):
+#   pip install pyinstaller pytest
