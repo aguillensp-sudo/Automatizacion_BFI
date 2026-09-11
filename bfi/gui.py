@@ -358,13 +358,21 @@ class AplicacionBFI(ttk.Frame):
 
         # --- Informe al usuario ---
         self._informar(resultado, ruta)
-        if not simular and resultado.insertados > 0:
+        # El CSV se borra UNICAMENTE si el volcado fue real y limpio. Si hubo
+        # errores se conserva: es la unica prueba de que lineas fallaron.
+        if simular:
+            self.logger.info("Simulacion: el CSV se conserva en %s", ruta)
+        elif resultado.insertados > 0 and resultado.erroneos == 0:
             self.logger.info("Borrando el CSV generado (%s)...", ruta)
             try:
                 Path(ruta).unlink()
                 self.logger.info("CSV eliminado: %s", ruta)
             except OSError as exc:
                 self.logger.warning("No se pudo borrar el CSV: %s", exc)
+        elif resultado.erroneos:
+            self.logger.warning(
+                "El CSV se conserva en %s porque hubo %d linea(s) con error.",
+                ruta, resultado.erroneos)
 
     # ---------------------------------------------------------------- salida
     def _informar(self, resultado: ResultadoProceso, ruta_csv: str) -> None:
