@@ -1,0 +1,24 @@
+# Normalizacion de finales de linea por tipo de fichero.
+#
+# Los .bat DEBEN ir en CRLF: con finales LF, cmd.exe se comporta de forma
+# impredecible (se comio la primera letra de cada linea y los scripts dejaron de
+# funcionar). Esto lo garantiza en cada clonacion, en cualquier sistema.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# El codigo y la documentacion, en LF.
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+.gitignore    text eol=lf
+.gitattributes text eol=lf
+
+# Ficheros binarios: nunca se tocan.
+*.ico   binary
+*.pdf   binary
+*.xlsx  binary
+*.exe   binary
+*.7z    binary

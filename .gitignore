@@ -1,0 +1,34 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Artefactos de compilacion
+build/
+dist/
+*.spec.bak
+
+# El instalador se genera con "crear_instalador.bat"; no se versiona porque son
+# ~20 MB de binarios reproducibles desde el codigo fuente.
+Instalar BFI Extractor.exe
+
+# Registros y salidas generadas en tiempo de ejecucion
+logs/
+*.log
+movimientos_bfi.csv
+
+# Ficheros de sistema
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Credenciales: NUNCA al repositorio.
+# Se configuran por usuario con la propia aplicacion o con setx.
+.env
+credenciales*.txt
