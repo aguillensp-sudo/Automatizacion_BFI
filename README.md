@@ -201,8 +201,17 @@ trazas están en `docs/VERIFICACION_ESCRITURA.md` y en `tools/`.
   importe entran en la clave porque hay extractos con la misma referencia
   repetida en varias líneas de una misma operación.
 
+* **Los ingresos (`credito`) se escriben con `Egreso/Ingreso = False`.** En el
+  extracto de ejemplo hay **3 ingresos de 44 líneas**. La comprobación que los
+  cubre no es un recuento a mano: `tools/validar_extraccion.py` reconstruye la
+  cadena de saldos de cada cuenta y exige que cada saldo sea el anterior más o
+  menos el importe. Si esa cadena encaja en las 41 transiciones, no falta ningún
+  movimiento ni hay ningún signo invertido.
+
 * **El CSV se escribe con BOM UTF-8** para que Excel lo abra con los acentos
-  correctos, y se borra solo tras un volcado real correcto.
+  correctos, y se borra solo tras un volcado real correcto **y sin errores**: si
+  alguna línea falla, el CSV se conserva porque es la única prueba de qué no se
+  insertó.
 
 * **La tabla `DF` «BFI 61021 (TEST)» es estructuralmente idéntica a `TD`.** Por
   eso los ensayos se hacen contra ella: allí se validó el circuito completo de 44

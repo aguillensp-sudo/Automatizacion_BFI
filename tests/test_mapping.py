@@ -217,3 +217,65 @@ def test_la_misma_referencia_con_importe_distinto_no_es_duplicado():
 
 def test_clave_duplicado_redondea_a_dos_decimales():
     assert clave_duplicado(fila(debito="100.004"))[2] == 100.0
+
+
+# ---------------------------------------------------------------------------
+# Regresion: los INGRESOS (columna credito)
+# ---------------------------------------------------------------------------
+# Estas pruebas existen por un error real: en la primera entrega de este
+# proyecto se afirmo, sin comprobarlo, que el CSV no tenia ninguna linea con
+# credito. Tenia tres. La comprobacion a mano estaba mal; el codigo, bien. Estas
+# pruebas fijan el comportamiento para que no dependa de que nadie mire bien.
+
+CUENTA_A_TABLA = {"0300000005399610": ("OD", CAMPOS_OD),
+                  "0300000006074740": ("PD", CAMPOS_PD),
+                  "0300000006102035": ("TD", CAMPOS_TD)}
+
+
+def _csv_real():
+    ruta = RAIZ / "movimientos_bfi.csv"
+    if not ruta.exists():
+        pytest.skip("movimientos_bfi.csv no esta en el repositorio")
+    return leer_csv(str(ruta))
+
+
+def test_el_csv_real_tiene_ingresos_y_el_recuento_es_explicito():
+    filas = _csv_real()
+    ingresos = [f for f in filas if (f.get("credito") or "").strip()]
+    debitos = [f for f in filas if (f.get("debito") or "").strip()]
+    assert len(filas) == 44, "el CSV de ejemplo deberia tener 44 lineas"
+    assert len(ingresos) == 3, "el CSV de ejemplo deberia tener 3 lineas de credito"
+    assert len(debitos) == 41
+    assert len(ingresos) + len(debitos) == len(filas), \
+        "cada linea debe tener exactamente uno de los dos importes"
+
+
+def test_cada_linea_del_csv_real_escribe_el_signo_correcto():
+    """El ingreso va como Egreso/Ingreso = False y su importe en el campo D."""
+    for fila_csv in _csv_real():
+        tabla, campos = CUENTA_A_TABLA[fila_csv["cuenta_no"]]
+        m = resolver_mapeo(tabla, campos)
+        p = construir_payload(fila_csv, m)
+        campo_importe = m.nombre("importe")
+        es_ingreso = bool((fila_csv.get("credito") or "").strip())
+        assert p["fields"]["Egreso/Ingreso"] is (not es_ingreso), \
+            "signo equivocado en la referencia %s" % fila_csv["referencia"]
+        valor = p["fields"][campo_importe]
+        if es_ingreso:
+            assert valor == float(fila_csv["credito"])
+        else:
+            assert valor == float(fila_csv["debito"])
+
+
+def test_los_tres_ingresos_del_csv_real_son_los_esperados():
+    """Fija los tres ingresos concretos: si el extractor cambia, salta aqui."""
+    esperados = {
+        ("0300000006074740", "85522010001246", 19102.86),
+        ("0300000006102035", "FT2619151273", 7992.0),
+        ("0300000006102035", "52542310006746", 8.0),
+    }
+    obtenidos = set()
+    for f in _csv_real():
+        if (f.get("credito") or "").strip():
+            obtenidos.add((f["cuenta_no"], f["referencia"], float(f["credito"])))
+    assert obtenidos == esperados

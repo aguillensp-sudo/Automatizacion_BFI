@@ -32,3 +32,8 @@ desktop.ini
 # Se configuran por usuario con la propia aplicacion o con setx.
 .env
 credenciales*.txt
+
+# Extractos bancarios reales: contienen datos financieros de la empresa y de
+# terceros (cuentas, importes, beneficiarios). No se publican, igual que el CSV
+# que se genera a partir de ellos. Se quedan en el disco de quien los procesa.
+*.pdf

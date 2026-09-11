@@ -9,6 +9,44 @@ campos escribibles. Ninguna prueba escribió en `OD`, `PD` ni `TD`.
 
 ---
 
+## 0. Correcciones a versiones anteriores de este informe
+
+Dos errores de la primera entrega, corregidos aquí para que quede constancia en
+el mismo sitio donde se afirmaron:
+
+1. **«El CSV no tiene ninguna línea con crédito»** — falso. Tiene **tres**
+   (19.102,86 / 7.992,00 / 8,00). Salió de un recuento a mano, no de una
+   comprobación. Ver §5-bis.
+2. **El mensaje del commit `7052116` presenta la aceptación de ids de campo como
+   un hallazgo de este proyecto.** No lo es: ya estaba documentado y verificado
+   en `Automatizacion JI` → `docs/ninox/README.md` §7. No se ha reescrito la
+   historia de un repositorio ya publicado; la corrección queda aquí.
+
+---
+
+## 0-bis. Aviso sobre el alcance de esta verificación
+
+Este informe **no descubre** cómo funciona la API de escritura de Ninox: eso ya
+estaba documentado, y verificado contra la base real, en el proyecto hermano
+`Automatizacion JI`:
+
+> `docs/ninox/README.md` §0 (reglas de actuación) y **§7 (Escritura), verificado
+> el 11/09/2026** con `tools/verify_write_api.py`.
+
+La guía indica además el orden de lectura correcto: quien vaya a escribir debe
+leer §0 y §7 **enteros antes de tocar nada**. Aquí se distinguen tres cosas:
+
+| | |
+|---|---|
+| **Ya documentado y confirmado** | La forma del cuerpo (`{"fields": {...}}`), que los ids de campo funcionan, que el `PUT` hace *merge*, y que un nombre de campo inexistente devuelve HTTP 500. Está en §7. |
+| **Específico de este proyecto** | El mapeo cuenta → tabla y columna → campo (documento funcional `AppWindows_BFI.md`), y el comportamiento particular de `Saldo inicial`, `Secuencial` y `Conciliado` en `OD`/`PD`/`TD`/`DF`. |
+| **Medido aquí, sin documentar en ninguna parte** | La cadena de saldos de los extractos reales y el recuento de líneas e ingresos. |
+
+Las sondas de esta carpeta se conservan para poder repetir cada medición, no
+porque sustituyan a la guía.
+
+---
+
 ## 1. ¿La API acepta el *id* de campo (`R1`, `G1`…) o exige el nombre?
 
 **Acepta el id de campo.** Es el punto que decidía si el mapeo del documento
@@ -104,41 +142,101 @@ Borrando los 44 registros creados... Limpieza terminada. Fallos: 0
 
 ---
 
-## 5. Prueba de punta a punta: PDF → CSV → Ninox
+## 5. Prueba de punta a punta con los PDFs reales
 
-`tools/prueba_extractor_sintetico.py` genera un extracto **con el mismo formato
-de texto** que produce el banco (el CSV de ejemplo salió de uno real) y
-`main.py insertar … --tabla-test` lo procesa entero:
+`python tools/validar_extraccion.py .` sobre los **20 extractos PDF reales**:
 
 ```
-1 PDF(s) encontrados.
-Procesando: extracto.pdf
-   -> 3 movimiento(s) | cuenta 0300000006102035 | estado 522
-CSV generado: movimientos_bfi.csv (3 filas)
-TD — BFI 61020: 3 linea(s)
-Mapeo validado para OD (9 campos comprobados).
-Mapeo validado para PD (9 campos comprobados).
-Mapeo validado para TD (10 campos comprobados).
-Conexion correcta: OD OK, PD OK, TD OK
-ENSAYO: se escribe en DF en lugar de en las tablas reales.
-DF: 0 registros en Ninox, 0 linea(s) ya presentes.
-   corregido: registro 97: 'Saldo inicial' se corrigio a 27250.15
-   corregido: registro 98: 'Saldo inicial' se corrigio a 31270.14
-   corregido: registro 99: 'Saldo inicial' se corrigio a 28770.14
-   -> DF: 3 insertada(s), 0 omitida(s), 0 con error
-CSV eliminado: movimientos_bfi.csv
+=== 1. LINEAS POR CUENTA ===
+   0300000005399610   ->  37 lineas  (tabla OD)
+   0300000006102035   ->   5 lineas  (tabla TD)
+   0300000006074740   ->   2 lineas  (tabla PD)
+   TOTAL              ->  44 lineas
+
+=== 2. IMPORTES (debito XOR credito) ===
+   solo debito    : 41
+   solo credito   : 3  <-- ingresos
+   ninguno        : 0
+   los dos a la vez: 0
+
+=== 3. CADENA DE SALDOS (saldo[i] = saldo[i-1] +/- importe[i]) ===
+   0300000005399610: 36/36 movimientos encadenan
+   0300000006074740: 1/1 movimientos encadenan
+   0300000006102035: 4/4 movimientos encadenan
+
+=== 4. SIGNO ESCRITO EN NINOX (Egreso/Ingreso) ===
+   lineas con Egreso/Ingreso = False (ingresos): 3
+   lineas con Egreso/Ingreso = True  (egresos) : 41
 ```
 
-Y los tres registros quedaron así en Ninox (leídos de vuelta antes de borrarlos):
+La comprobación **3** es la fuerte: reconstruye la cadena de saldos de cada
+cuenta y exige que cada saldo sea el anterior más o menos el importe. Que encajen
+las 41 transiciones descarta a la vez un movimiento perdido, un importe mal leído
+y un signo invertido.
 
-| Fecha | Referencia | Detalle | Importe | Egreso/Ingreso | Saldo inicial |
-|---|---|---|---|---|---|
-| 2026-06-30 | FT2619000001 | COMISION BANCARIA | 1 | `true` | 27250.15 |
-| 2026-06-30 | FT2619000002 | TRANSFERENCIA RECIBIDA: USD | 4019.99 | `false` | 31270.14 |
-| 2026-07-01 | DC2618000003 | PAGO PROVEEDOR ACOREC S.A. | 2500 | `true` | 28770.14 |
+### Los tres ingresos, insertados de verdad y releídos de Ninox
 
-`Tipo de Cambio CUP-USD` = 24 en los tres (regla del apartado 5.2 para `TD`) y
-`Factura` en blanco en los tres.
+`python main.py insertar <carpeta> --confirmar --tabla-test` con los 20 PDFs
+(redirigido a `DF`), y después lectura de lo que quedó guardado:
+
+```
+registros insertados en DF: 44
+
+=== VERIFICACION DE SIGNOS ===
+   Egreso/Ingreso = False (INGRESOS/creditos): 3
+   Egreso/Ingreso = True  (EGRESOS/debitos) : 41
+
+=== LOS INGRESOS, tal como quedaron en Ninox ===
+   fecha=2026-07-20 ref=85522010001246   importe=19102.86  saldo=127648.18
+   fecha=2026-07-08 ref=FT2619151273     importe=7992      saldo=31218.13
+   fecha=2026-08-19 ref=52542310006746   importe=8         saldo=28026.13
+```
+
+**44 insertadas, 0 omitidas, 0 errores.** Cada crédito con su importe en el campo
+`D` de su tabla (`Importe CUP` en PD, `Importe USD` en TD) y
+`Egreso/Ingreso = False`. `DF` se limpió después: **0 registros restantes**.
+
+---
+
+## 5-bis. Corrección de un error de este mismo informe
+
+**En la primera versión de este documento se afirmó que el CSV no tenía ninguna
+línea con crédito. Era falso: tiene tres.** La afirmación salió de un recuento
+hecho a mano en una consola, no de una comprobación, y contradecía el propio
+fichero que estaba delante. El extractor siempre las trató bien; el error fue
+exclusivamente del informe.
+
+La lección no es «mirar mejor», es que **un recuento a ojo no es una
+verificación**. Por eso ahora existen:
+
+* `tools/validar_extraccion.py`, que recalcula los totales desde los PDFs y
+  valida además la cadena de saldos de cada cuenta;
+* tres pruebas de regresión en `tests/test_mapping.py` que fijan los tres
+  ingresos concretos y el signo que se escribe para cada línea.
+
+---
+
+## 5-ter. Prueba con un extracto sintético
+
+`tools/prueba_extractor_sintetico.py` genera un PDF con el mismo formato de texto
+del banco y comprueba cabecera, importes y mapa de cuentas. Permite verificar el
+parser sin depender de tener los extractos reales a mano:
+
+```
+Cabecera detectada:
+   cuenta_no       = '0300000006102035'
+   moneda          = 'USD'
+   saldo_anterior  = 27251.15
+Movimientos: 3
+   2026-06-30 | FT2619000001 | debito=1.0     credito=None     saldo=27250.15
+   2026-06-30 | FT2619000002 | debito=None    credito=4019.99  saldo=31270.14
+   2026-07-01 | DC2618000003 | debito=2500.0  credito=None     saldo=28770.14
+Cuenta -> tabla Ninox: TD
+```
+
+Estos tres registros también se insertaron en `DF` y se releyeron: los tres con
+`Tipo de Cambio CUP-USD = 24` (regla del apartado 5.2 para `TD`) y `Factura` en
+blanco, y con `Egreso/Ingreso` correcto (`true`, `false`, `true`).
 
 ---
 
@@ -159,6 +257,9 @@ Y los tres registros quedaron así en Ninox (leídos de vuelta antes de borrarlo
 ## 7. Cómo repetir estas pruebas
 
 ```bat
+python tools\validar_extraccion.py .        ::  CSV vs PDFs reales + cadena de saldos
+                                            ::  (la comprobacion mas fuerte; no usa Ninox)
+
 python tools\probe_df.py                    ::  simulación (no escribe)
 python tools\probe_df.py --execute          ::  id de campo vs nombre
 
