@@ -91,12 +91,14 @@ def cmd_insertar(args, log) -> int:
             print("   CORREGIDO %s" % cor)
         for disc in tabla.discrepancias:
             print("   AVISO %s" % disc)
-    if resultado.insertados and not args.conservar_csv:
+    if resultado.insertados and not args.conservar_csv and resultado.erroneos == 0:
         try:
             Path(ruta_csv).unlink()
             print("CSV eliminado: %s" % ruta_csv)
         except OSError as exc:
             print("No se pudo borrar el CSV: %s" % exc)
+    elif resultado.erroneos:
+        print("El CSV se conserva en %s porque hubo lineas con error." % ruta_csv)
     return 0 if resultado.erroneos == 0 else 1
 
 
