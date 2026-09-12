@@ -32,6 +32,7 @@ un HTTP 500 indistinguible de una caida del servidor.
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -157,6 +158,36 @@ def agrupar_por_tabla(filas: Iterable[Dict[str, str]]) -> Dict[str, List[Dict[st
 # Construccion del payload
 # ---------------------------------------------------------------------------
 
+def normalizar_fecha(texto: Any) -> str:
+    """Fecha del CSV -> formato ISO ``YYYY-MM-DD``, que es el que guarda Ninox.
+
+    El extractor escribe ISO, pero el CSV es un fichero que puede acabar abierto
+    en Excel, y Excel lo guarda con las fechas en formato local (``08/07/2026``)
+    y sin el decimal de los numeros. Si eso pasara, la aplicacion enviaria la
+    fecha tal cual y Ninox no la reconoceria.
+
+    Por eso se aceptan las dos formas y se convierte. Devuelve cadena vacia si el
+    valor no es una fecha reconocible, para que el llamante lo trate como error
+    en vez de inventarse un dato.
+    """
+    t = str(texto or "").strip()
+    if not t:
+        return ""
+    # ISO, tal como lo escribe el extractor.
+    m = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", t)
+    if m:
+        anio, mes, dia = m.groups()
+        return "%s-%s-%s" % (anio, mes.zfill(2), dia.zfill(2))
+    # Formato local espanol, tal como lo deja Excel: dd/mm/aaaa o dd-mm-aaaa.
+    m = re.match(r"^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$", t)
+    if m:
+        dia, mes, anio = m.groups()
+        if len(anio) == 2:
+            anio = "20" + anio
+        return "%s-%s-%s" % (anio, mes.zfill(2), dia.zfill(2))
+    return ""
+
+
 def _a_float(texto: Any) -> Optional[float]:
     """Convierte a float un valor del CSV. Devuelve None si viene vacio."""
     if texto is None:
@@ -210,12 +241,14 @@ def construir_payload(fila: Dict[str, str], mapeo: MapeoResuelto) -> Dict[str, A
         campos[nombre] = valor
 
     # --- Columnas directas del CSV ---
-    fecha = (fila.get("fecha_valor") or "").strip()
-    if fecha:
-        poner("fecha_valor", fecha)
-    else:
-        raise ErrorDeMapeo("Fila sin fecha_valor (referencia %r)."
-                           % fila.get("referencia", "?"))
+    fecha = normalizar_fecha(fila.get("fecha_valor"))
+    if not fecha:
+        raise ErrorDeMapeo(
+            "Fila con fecha_valor vacia o no reconocible (%r) en la referencia %r. "
+            "Se espera 2026-07-08 (formato del extractor) o 08/07/2026 (si el CSV "
+            "se ha guardado desde Excel)."
+            % (fila.get("fecha_valor", ""), fila.get("referencia", "?")))
+    poner("fecha_valor", fecha)
 
     poner("referencia", (fila.get("referencia") or "").strip())
     poner("detalle", (fila.get("detalle") or "").strip())

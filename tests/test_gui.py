@@ -40,32 +40,59 @@ tk = pytest.importorskip("tkinter", reason="tkinter no disponible")
 def _buscar_pdfs():
     """Extractos de prueba, buscando en los sitios donde suelen estar.
 
-    Los PDFs son datos reales de clientes y no se versionan, asi que su ubicacion
-    cambia: en el proyecto durante el desarrollo, y en la carpeta de la
-    aplicacion (o en una subcarpeta suya, como "Extractos") cuando alguien copia
-    el programa para usarlo. Tambien se admite la variable de entorno
-    ``BFI_PDFS`` para apuntar a cualquier otra carpeta.
+    Los PDFs son datos reales de clientes y no se versionan, asi que su numero y
+    su ubicacion cambian: durante las pruebas manuales es normal ir dejando
+    carpetas con uno o dos extractos para ensayar, y apartando el resto. Se
+    admiten todas las variantes y, si hay varias carpetas con PDFs, se usa la
+    que mas tiene. La variable de entorno ``BFI_PDFS`` apunta a otra cualquiera.
     """
     candidatas = []
     if os.environ.get("BFI_PDFS"):
         candidatas.append(Path(os.environ["BFI_PDFS"]))
     candidatas += [RAIZ, RAIZ / "BFI Extractor"]
-    # Subcarpetas de primer y segundo nivel: cubre "BFI Extractor/Extractos".
     for base in list(candidatas):
         if base.is_dir():
             candidatas += [d for d in base.iterdir() if d.is_dir()]
+    # Un nivel mas: cubre "BFI Extractor/Extractos/NO USAR".
+    for base in list(candidatas):
+        if base.is_dir():
+            candidatas += [d for d in base.iterdir() if d.is_dir()]
+
+    mejor, mejor_n = None, 0
     for carpeta in candidatas:
         if carpeta.is_dir():
             encontrados = listar_pdfs(str(carpeta))
-            if encontrados:
-                return encontrados
-    return []
+            if len(encontrados) > mejor_n:
+                mejor, mejor_n = encontrados, len(encontrados)
+    return mejor or []
 
 
 PDFS = _buscar_pdfs()
 sin_pdfs = pytest.mark.skipif(
     not PDFS,
     reason="no se han encontrado extractos PDF (pon BFI_PDFS=<carpeta> para indicarlos)")
+
+
+def _esperado():
+    """Cuenta las lineas que producen los PDFs que haya, en vez de fijarlas.
+
+    Antes las pruebas exigian 44 lineas porque ese era el juego completo. Al
+    apartar extractos para ensayar, esa cifra deja de ser cierta y la prueba
+    fallaba sin que hubiera nada roto. Ahora se calcula, que es lo unico que
+    sigue siendo verdad con cualquier conjunto de PDFs.
+    """
+    import tempfile
+    from bfi.extractor import procesar_pdfs
+    from bfi.mapping import agrupar_por_tabla, leer_csv
+
+    with tempfile.TemporaryDirectory(prefix="bfi_esperado_") as tmp:
+        csv_path = str(Path(tmp) / "esperado.csv")
+        procesar_pdfs(PDFS, csv_path, aviso=lambda _m: None)
+        grupos = agrupar_por_tabla(leer_csv(csv_path))
+    return sum(len(v) for v in grupos.values()), sorted(grupos)
+
+
+ESPERADO_TOTAL, ESPERADO_TABLAS = _esperado()
 
 
 @pytest.fixture(scope="module")
@@ -226,7 +253,7 @@ def test_solo_extraer_genera_el_csv_y_deja_el_fichero(ventana):
     csv = Path(ventana.app._directorio) / config.CSV_BASENAME
     assert csv.exists(), "el CSV debe quedar en la carpeta elegida por el usuario"
     lineas = csv.read_text(encoding="utf-8-sig").strip().splitlines()
-    assert len(lineas) == 45, "44 movimientos + cabecera"
+    assert len(lineas) == ESPERADO_TOTAL + 1, "movimientos + cabecera"
     assert "CSV generado" in ventana.texto_registro
     assert "No se pudo conectar" not in ventana.texto_registro
 
@@ -246,9 +273,9 @@ def test_leer_rellena_la_tabla_y_no_toca_ninox(ventana):
     ventana.leer()
 
     filas = ventana.filas_tabla()
-    assert len(filas) == 3, "deben aparecer OD, PD y TD en la tabla"
+    assert len(filas) == len(ESPERADO_TABLAS), "deben aparecer las tablas detectadas"
     total = sum(int(f[1]) for f in filas)
-    assert total == 44, "la tabla debe sumar las 44 lineas del extracto"
+    assert total == ESPERADO_TOTAL, "la tabla debe sumar todas las lineas del extracto"
 
     # Y sin haber tocado el ERP: no debe aparecer ni la conexion con Ninox.
     registro = ventana.texto_registro
@@ -258,7 +285,7 @@ def test_leer_rellena_la_tabla_y_no_toca_ninox(ventana):
 
     # El boton de volcar queda disponible solo despues de leer.
     assert str(ventana.app.btn_volcar["state"]) == "normal"
-    assert "Contenido leido: 44 linea(s)" in ventana.app.lbl_resumen["text"]
+    assert "Contenido leido: %d linea(s)" % ESPERADO_TOTAL in ventana.app.lbl_resumen["text"]
 
 
 @sin_pdfs
@@ -313,9 +340,9 @@ def test_volcar_en_simulacion_recorre_todo_el_flujo(ventana):
 
     # La tabla debe seguir mostrando el contenido.
     filas = ventana.filas_tabla()
-    assert len(filas) == 3, "deben aparecer OD, PD y TD en la vista previa"
+    assert len(filas) == len(ESPERADO_TABLAS), "deben aparecer las tablas detectadas"
     total = sum(int(f[1]) for f in filas)
-    assert total == 44, "la vista previa debe sumar las 44 lineas del extracto"
+    assert total == ESPERADO_TOTAL, "la vista previa debe sumar todas las lineas"
 
     # En simulacion el CSV se conserva.
     csv = Path(ventana.app._directorio) / config.CSV_BASENAME
@@ -394,19 +421,20 @@ def test_una_segunda_pasada_detecta_lo_ya_insertado(monkeypatch, tmp_path, raiz_
         v.leer()
         v.volcar()
         registro = v.texto_registro
-        assert "44 insertada(s), 0 omitida(s), 0 con error" in registro, registro[-900:]
+        esperado = "%d insertada(s), 0 omitida(s), 0 con error" % ESPERADO_TOTAL
+        assert esperado in registro, registro[-900:]
 
         # Recoger lo creado por ESTA prueba, para limpiarlo pase lo que pase.
         creados = [r for r in cli.fetch_all_records(config.TABLA_TEST, use_cache=False)
                    if r["id"] not in ids_antes]
-        assert len(creados) == 44, "deberian haberse creado 44 registros nuevos"
+        assert len(creados) == ESPERADO_TOTAL, "deberian haberse creado tantos registros como lineas"
 
-        # --- Segunda pasada: sus 44 lineas deben salir como duplicadas ---
+        # --- Segunda pasada: todas sus lineas deben salir como duplicadas ---
         v.leer()
         v.volcar()
         ultimo = v.texto_registro.split("Leyendo")[-1]
-        assert "44 linea(s) ya presentes" in ultimo, ultimo[-900:]
-        assert "0 insertada(s), 44 omitida(s)" in ultimo
+        assert "%d linea(s) ya presentes" % ESPERADO_TOTAL in ultimo, ultimo[-900:]
+        assert "0 insertada(s), %d omitida(s)" % ESPERADO_TOTAL in ultimo
     finally:
         for rec in creados:
             try:
