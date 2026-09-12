@@ -260,6 +260,30 @@ class AplicacionBFI(ttk.Frame):
             return
         self._lanzar(self._tarea_solo_extraer, "Extrayendo PDFs...")
 
+    def _resumen_a_confirmar(self) -> str:
+        """Lineas de lo que se va a insertar, calculadas de verdad.
+
+        Antes este aviso estaba escrito a mano y nombraba SIEMPRE las tres tablas,
+        incluso cuando solo se iba a tocar una (y con las tablas mal listadas).
+        Un aviso de escritura en el ERP tiene que decir la verdad: cuantas
+        registros y en que tablas.
+        """
+        total = sum(len(v) for v in self._grupos.values())
+        lineas = ["Vas a INSERTAR %d registro(s) REALES en el ERP Ninox:"
+                  % total, ""]
+        for tabla in sorted(self._grupos):
+            cuantas = len(self._grupos[tabla])
+            etiqueta = config.TABLA_A_ETIQUETA.get(tabla, tabla)
+            omitidas = sum(1 for f in self._grupos[tabla] if f.get("_duplicado"))
+            aviso = ("  (%d ya existen y no se insertaran)" % omitidas) if omitidas else ""
+            lineas.append("   • %d registro(s) en %s%s" % (cuantas, etiqueta, aviso))
+        lineas += [
+            "",
+            "En Ninox no hay transacciones ni deshacer: un registro insertado no se "
+            "puede deshacer automaticamente.",
+        ]
+        return "\n".join(lineas)
+
     def volcar(self) -> None:
         """Segundo paso: escribe en Ninox lo que ya se leyo y se mostro."""
         if not self._comprobar_carpeta():
@@ -277,13 +301,7 @@ class AplicacionBFI(ttk.Frame):
             self._lanzar(self._tarea_leer, "Leyendo los PDFs...")
             return
         if not self.var_simular.get():
-            if not messagebox.askyesno(
-                    APP_NAME,
-                    "Vas a INSERTAR registros REALES en el ERP Ninox.\n\n"
-                    "Las tablas destino son OD (BFI 05399610), PD (BFI 06074740) "
-                    "y TD (BFI 61020).\n"
-                    "En Ninox no hay transacciones ni deshacer.\n\n"
-                    "¿Continuar?"):
+            if not messagebox.askyesno(APP_NAME, self._resumen_a_confirmar()):
                 return
         self._lanzar(self._tarea_volcar, "Procesando...")
 
@@ -470,6 +488,14 @@ class AplicacionBFI(ttk.Frame):
             partes.append("SIMULACION completada — no se ha escrito nada en Ninox.\n")
         else:
             partes.append("Proceso terminado.\n")
+
+        # Totales primero: es lo que el usuario quiere saber de un vistazo.
+        partes.append("TOTAL: %d registro(s) %s, %d omitido(s), %d con error "
+                      "en %d tabla(s)."
+                      % (resultado.insertados,
+                         "que se insertarian" if resultado.simulado else "insertado(s)",
+                         resultado.omitidos, resultado.erroneos, len(resultado.tablas)))
+
         for t in resultado.tablas:
             partes.append("• %s: %d insertada(s), %d omitida(s), %d con error"
                           % (t.etiqueta, t.insertados, t.omitidos, t.erroneos))
@@ -491,7 +517,7 @@ class AplicacionBFI(ttk.Frame):
                           % len(discrepancias))
         if resultado.simulado and resultado.insertados:
             partes.append("\nPara escribir de verdad, desmarca «Modo simulacion» "
-                          "y vuelve a pulsar Procesar.")
+                          "y vuelve a pulsar «Volcar a Ninox».")
         texto = "\n".join(partes)
         self.logger.info("RESULTADO:\n%s", texto)
         self._cola.put(("estado", "Terminado."))
