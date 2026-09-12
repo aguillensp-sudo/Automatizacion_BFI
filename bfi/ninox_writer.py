@@ -150,16 +150,20 @@ class EscritorNinox:
                  simular: bool = True,
                  omitir_duplicados: bool = True,
                  verificar: bool = True,
-                 corregir: bool = True) -> ResultadoProceso:
+                 corregir: bool = False) -> ResultadoProceso:
         """Inserta (o simula) todos los grupos.
 
-        ``grupos`` son las filas del CSV, ya anotadas o no con ``_duplicado``.
+        ``grupos`` son las filas del CSV, ya anotadas o no con ``_duplicado``, y
+        **ordenadas por fecha_valor de mas antigua a mas reciente** (lo hace
+        ``mapping.agrupar_por_tabla``). Ese orden es obligatorio: la formula de
+        Ninox que calcula el saldo encadena cada fila con la anterior.
+
         En simulacion no se envia nada y se devuelven solo los recuentos.
 
-        ``verificar`` relee cada registro creado. ``corregir`` va un paso mas
-        alla: si un campo no se guardo como se envio, lo reintenta con un ``PUT``
-        (esta verificado que asi si se guarda; el valor por defecto solo gana en
-        el alta). Sin ``corregir`` esos campos se listan como discrepancias.
+        ``verificar`` relee cada registro creado para comprobar que se guardo lo
+        enviado. ``corregir`` se mantiene por compatibilidad y **no hace nada**:
+        la unica correccion que existia era la del saldo, y ese campo lo calcula
+        Ninox, asi que escribirlo seria contraproducente.
         """
         resultado = ResultadoProceso(simulado=simular)
         if simular:
@@ -245,71 +249,39 @@ class EscritorNinox:
         return False, "HTTP %s: %s%s" % (status, _corto(cuerpo), pista), None
 
     def _verificar(self, tabla: str, record_id: int, envio: Dict[str, Any],
-                   corregir: bool) -> Tuple[List[str], List[str]]:
-        """Comprueba que los campos se guardaron. Devuelve (discrepancias, corregidos).
+                   corregir: bool = False) -> Tuple[List[str], List[str]]:
+        """Comprueba que los campos enviados se guardaron de verdad.
 
-        Si un campo no se guardo como se envio y ``corregir`` esta activo, se
-        reintenta con un ``PUT``. Esta verificado contra la base real
-        (``tools/probe_saldo_put.py``) que asi SI se guarda: el valor por defecto
-        de la tabla solo se impone en el alta.
+        **No se comprueban los campos que calcula Ninox** (``Saldo inicial``): los
+        rellena una formula al crear el registro, asi que compararlos con lo
+        enviado daria un aviso en cada fila. La aplicacion ya no los envia.
+
+        Devuelve ``(discrepancias, corregidos)``. ``corregidos`` va siempre vacio:
+        ya no se reintenta nada con un ``PUT``. La unica correccion que existia
+        era la del saldo, y ese campo es de Ninox: escribirlo a mano dejaria la
+        fila fuera de la cadena de saldos y contaminaria las siguientes.
         """
         guardado = self.cli.get_record(tabla, record_id)
         if not guardado:
             return ["no se pudo releer el registro %s de %s" % (record_id, tabla)], []
         campos = guardado.get("fields", {})
 
-        def _igual(nombre: str, valor: Any) -> bool:
+        discrepancias: List[str] = []
+        for nombre, valor in envio["fields"].items():
+            if nombre in config.CAMPOS_QUE_CALCULA_NINOX:
+                continue                      # lo calcula Ninox: no es comparable
             real = campos.get(nombre, None)
             if real is None and valor == "":
-                return True
+                continue                      # vacio enviado, vacio guardado
             if isinstance(valor, float) and isinstance(real, (int, float)):
-                return abs(float(real) - valor) < 0.005
-            return real == valor
-
-        pendientes = {n: v for n, v in envio["fields"].items() if not _igual(n, v)}
-        if not pendientes:
-            return [], []
-
-        discrepancias: List[str] = []
-        corregidos: List[str] = []
-
-        if corregir:
-            try:
-                status, _ = self.cli.update_record(tabla, record_id,
-                                                   {"fields": pendientes})
-            except NinoxError as exc:
-                status = 0
-                discrepancias.append("registro %s de %s: fallo al corregir: %s"
-                                     % (record_id, tabla, exc))
-            if status == 200:
-                releido = (self.cli.get_record(tabla, record_id) or {}).get("fields", {})
-                for nombre, valor in pendientes.items():
-                    real = releido.get(nombre, None)
-                    if real == valor or (isinstance(valor, float)
-                                         and isinstance(real, (int, float))
-                                         and abs(float(real) - valor) < 0.005):
-                        corregidos.append(
-                            "registro %s de %s: '%s' se habia quedado en %r y se "
-                            "corrigio a %r con un segundo envio"
-                            % (record_id, tabla, nombre, campos.get(nombre), valor))
-                    else:
-                        discrepancias.append(
-                            "registro %s de %s: '%s' sigue en %r pese a enviar %r "
-                            "(campo calculado por Ninox: no se puede forzar)"
-                            % (record_id, tabla, nombre, real, valor))
-                return discrepancias, corregidos
-            for nombre, valor in pendientes.items():
-                discrepancias.append(
-                    "registro %s de %s: '%s' se envio %r y quedo %r"
-                    % (record_id, tabla, nombre, valor, campos.get(nombre)))
-            return discrepancias, corregidos
-
-        for nombre, valor in pendientes.items():
+                if abs(float(real) - valor) < 0.005:
+                    continue
+            elif real == valor:
+                continue
             discrepancias.append(
-                "registro %s de %s: '%s' se envio %r y quedo %r "
-                "(campo con valor por defecto en el alta)"
-                % (record_id, tabla, nombre, valor, campos.get(nombre)))
-        return discrepancias, corregidos
+                "registro %s de %s: '%s' se envio %r y quedo %r"
+                % (record_id, tabla, nombre, valor, real))
+        return discrepancias, []
 
 
 def _payload_legible(campos: Dict[str, Any]) -> str:

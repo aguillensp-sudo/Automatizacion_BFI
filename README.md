@@ -18,9 +18,12 @@ el usuario lo confirma**.
 3. Agrupa las líneas por número de cuenta y resuelve la tabla Ninox destino.
 4. Compara con la tabla destino y avisa de las líneas que **ya existen**.
 5. Inserta las líneas nuevas (o simula la inserción).
-6. **Relee cada registro creado** y corrige los campos que Ninox haya descartado.
+6. **Relee cada registro creado** para comprobar que se guardó lo enviado.
 7. Si la inserción fue real y correcta, **borra el CSV**.
 8. Informa al usuario de cuántas líneas se insertaron y en qué tablas.
+
+> **No se escribe el `Saldo inicial`**: lo calcula una fórmula de Ninox (§4-bis).
+> Tampoco se corrige nada con un `PUT`.
 
 ---
 
@@ -49,10 +52,12 @@ Reglas adicionales (apartado 5.2, aplican a las tres tablas):
 |---|---|
 | `debito` informado → es un egreso | `F` = **`False`** (toggle **gris**, izquierda) |
 | `credito` informado → es un ingreso | `F` = **`True`** (toggle **azul**, derecha) |
+| Un **ingreso** lleva `Concepto = 11` («Ingresos recibidos») | `C` = `"11"` |
 | Las dos columnas van al **mismo** campo de importe | `D` = débito si existe, si no crédito |
 | Oper. en tránsito = No | `O1` (OD) / `M1` (PD) / `Q1` (TD) = `"No"` |
 | Tipo de Cambio en blanco en OD y PD | el campo se **omite** (ver §6) |
 | `TD`: `J` = 24 y `C1` = blanco | `J` = `24`, `C1` = `""` |
+| **`Saldo inicial` NO se escribe nunca** | el campo `O` **no se envía**: lo calcula Ninox (ver §6) |
 
 > ⚠ **El booleano `F` «Egreso/Ingreso»: mapeo verificado en Ninox el 12/09/2026.**
 > El apartado 5.2 del documento funcional decía lo contrario
@@ -66,6 +71,39 @@ Reglas adicionales (apartado 5.2, aplican a las tres tablas):
 >
 > Regla mnemotécnica: **azul = `True` = crédito/ingreso**, **gris = `False` =
 > débito/egreso**.
+
+> ⚠ **`Concepto = 11` en los ingresos es obligatorio.** La fórmula de Ninox que
+> calcula el saldo depende de ese campo: un ingreso sin `Concepto` se quedaría
+> sin saldo. Mismo valor en las tres tablas (en `OD`, `PD` y `TD` el campo es el
+> id `C`). De momento **no hay valor definido para los egresos**, así que no se
+> escribe.
+
+---
+
+## 4-bis. El orden de inserción NO es opcional
+
+**Las líneas se insertan siempre de la más antigua a la más reciente, según
+`fecha_valor`**, y el programa lo garantiza ordenando cada tabla antes de
+escribir (`mapping.agrupar_por_tabla`).
+
+No es una preferencia estética: **la fórmula de Ninox que calcula `Saldo inicial`
+encadena cada fila con la anterior.** Comprobado en la tabla `TD` de producción
+el 12/09/2026, con un registro de prueba:
+
+```
+Fila anterior (id 956):  Saldo inicial 23.230,16  −  Importe 4,03  =  23.226,13
+El registro nuevo       recibió:                                        23.226,13
+```
+
+Consecuencias que hay que tener presentes:
+
+1. **Si se insertan desordenadas, el saldo sale mal y el error se arrastra a
+   todas las siguientes.** Un solo saldo incorrecto contamina el resto de la
+   cadena.
+2. **El booleano `Egreso/Ingreso` de cada fila decide si suma o resta**, así que
+   tiene que estar bien en todas.
+3. A igualdad de fecha se respeta el orden del fichero (ordenación estable).
+
 
 ---
 
@@ -146,7 +184,6 @@ Opciones de la ventana:
 | **Modo simulación** | Activado | Construye y muestra los envíos, pero **no escribe** en Ninox. |
 | Omitir las líneas que ya existen | Activado | Evita duplicar al reprocesar un PDF. |
 | Comprobar cada registro tras insertarlo | Activado | Relee y verifica lo guardado. |
-| Corregir los campos que Ninox descarte | Activado | Reenvía con un `PUT` los campos que el alta dejó con su valor por defecto. |
 
 **El primer volcado real conviene hacerlo con la simulación desactivada pero
 sobre pocas líneas**, para que el usuario vea el resultado en el ERP antes de
@@ -210,11 +247,17 @@ trazas están en `docs/VERIFICACION_ESCRITURA.md` y en `tools/`.
   un nombre de campo inexistente en Ninox devuelve **HTTP 500**, no un 400, y es
   indistinguible de una caída del servidor.
 
-* **`Saldo inicial` (`O`) ignora lo que se envía en el alta.** Se comprobó
-  enviando `999.99` y quedándose el registro en `23226.13` (valor por defecto de
-  la tabla). Pero un `PUT` posterior **sí** lo guarda. Por eso la aplicación
-  relee cada registro y, si procede, reenvía con un `PUT` los campos que el alta
-  descartó. Sin este paso, el saldo de cada línea se perdería en silencio.
+* **`Saldo inicial` (`O`) no se escribe NUNCA.** Lo calcula una fórmula de Ninox
+  al crear el registro, encadenando con la fila anterior. Se comprobó enviando
+  valores distintos y viendo que los pisaba. Escribirlo taparía ese cálculo, y
+  corregirlo con un `PUT` dejaría la fila fuera de la cadena **contaminando todas
+  las siguientes**. Por eso el programa no lo envía en ningún caso y la
+  verificación posterior no lo tiene en cuenta.
+
+* **El orden por `fecha_valor` es obligatorio** por lo mismo: ver §4-bis.
+
+* **`Concepto = 11` en los ingresos** es obligatorio porque la fórmula del saldo
+  depende de ese campo.
 
 * **`Secuencial` y `Conciliado` se rellenan solos.** No se envían y no se
   interpretan como datos escritos por la aplicación.
@@ -260,7 +303,7 @@ bfi/
   extractor.py               parser de los PDFs (pdfplumber) y escritura del CSV
   mapping.py                 CSV -> campos Ninox (puro, con tests)
   ninox_client.py            cliente REST de Ninox (solo biblioteca estandar)
-  ninox_writer.py            insercion, verificacion y correccion
+  ninox_writer.py            insercion y verificacion (sin correcciones)
   credentials.py             lectura de credenciales (entorno y Registro)
   configuracion_usuario.py   guardado de credenciales desde la ventana
   dialogo_credenciales.py    cuadro de dialogo de acceso a Ninox

@@ -25,13 +25,15 @@ from bfi.mapping import (ErrorDeMapeo, agrupar_por_tabla,  # noqa: E402
 # Campos en ids, tal y como los devuelve la API (recorte de los reales).
 CAMPOS_OD = {"B": "Fecha Bancaria", "R1": "Referencia", "G1": "Detalles",
              "D": "Importe CUP", "O": "Saldo inicial", "F": "Egreso/Ingreso",
-             "O1": "Oper. en tránsito", "Q1": "Factura", "J": "Tipo de Cambio"}
+             "O1": "Oper. en tránsito", "C": "Concepto", "Q1": "Factura",
+             "J": "Tipo de Cambio"}
 CAMPOS_PD = {"B": "Fecha Bancaria", "P1": "Referencia", "G1": "Detalles",
              "D": "Importe CUP", "O": "Saldo inicial", "F": "Egreso/Ingreso",
-             "M1": "Oper. en tránsito", "O1": "Factura", "J": "Tipo de Cambio"}
+             "M1": "Oper. en tránsito", "C": "Concepto", "O1": "Factura",
+             "J": "Tipo de Cambio"}
 CAMPOS_TD = {"B": "Fecha Bancaria", "S1": "Referencia", "K1": "Detalles",
              "D": "Importe USD", "O": "Saldo inicial", "F": "Egreso/Ingreso",
-             "Q1": "Oper. en tránsito", "R1": "Factura",
+             "Q1": "Oper. en tránsito", "C": "Concepto", "R1": "Factura",
              "J": "Tipo de Cambio CUP-USD", "C1": "Tipo de Cambio USD-EUR"}
 CAMPOS_DF = dict(CAMPOS_TD)
 
@@ -242,6 +244,119 @@ def test_una_fecha_ilegible_aborta_la_fila_con_un_mensaje_util():
     with pytest.raises(ErrorDeMapeo) as info:
         construir_payload(fila(fecha_valor="17 de julio"), m)
     assert "Excel" in str(info.value), "el mensaje debe explicar las dos formas validas"
+
+
+# ---------------------------------------------------------------------------
+# "Saldo inicial": NO se escribe nunca, lo calcula Ninox
+# ---------------------------------------------------------------------------
+
+def test_el_saldo_inicial_no_se_envia_nunca():
+    """El campo lo calcula una formula de Ninox al crear: la app no lo escribe.
+
+    Verificado en la TD de produccion el 12/09/2026: el registro nuevo recibio
+    exactamente el saldo final de la fila anterior. Si la aplicacion lo enviara,
+    taparia ese calculo; y si lo corrigiera con un PUT, dejaria la fila fuera de
+    la cadena y contaminaria las siguientes.
+    """
+    for tabla, campos in MAPAS.items():
+        m = resolver_mapeo(tabla, campos)
+        nombre = m.nombre("saldo")
+        assert nombre, "%s deberia declarar 'saldo' para poder informar de que se omite" % tabla
+        p = construir_payload(fila(), m)
+        assert nombre not in p["fields"], \
+            "no se debe enviar %r en %s" % (nombre, tabla)
+        assert nombre in p["omitidos"], \
+            "debe informarse de que %r se omite" % nombre
+
+
+def test_el_saldo_del_csv_aunque_venga_informado_no_se_toca():
+    """La columna 'saldo' del CSV se lee pero no genera ningun envio."""
+    m = resolver_mapeo("OD", CAMPOS_OD)
+    p = construir_payload(fila(saldo="7762838.6"), m)
+    assert "Saldo inicial" not in p["fields"]
+
+
+# ---------------------------------------------------------------------------
+# Concepto: obligatorio en los ingresos
+# ---------------------------------------------------------------------------
+
+def test_un_ingreso_lleva_concepto_11_en_las_tres_tablas():
+    """Concepto = 11 (Ingresos recibidos) es obligatorio en los ingresos.
+
+    La formula de Ninox que calcula el saldo depende de este campo, asi que un
+    ingreso sin Concepto se quedaria sin saldo. Mismo valor en OD, PD y TD.
+    """
+    for tabla, campos in (("OD", CAMPOS_OD), ("PD", CAMPOS_PD), ("TD", CAMPOS_TD)):
+        m = resolver_mapeo(tabla, campos)
+        p = construir_payload(fila(debito="", credito="7992.00"), m)
+        assert p["fields"]["Concepto"] == config.CONCEPTO_INGRESO, \
+            "el ingreso de %s debe llevar Concepto = %s" % (tabla, config.CONCEPTO_INGRESO)
+        assert config.CONCEPTO_INGRESO == "11"
+
+
+def test_un_egreso_no_lleva_concepto():
+    """De momento solo esta definido el valor para ingresos."""
+    for tabla, campos in (("OD", CAMPOS_OD), ("PD", CAMPOS_PD), ("TD", CAMPOS_TD)):
+        m = resolver_mapeo(tabla, campos)
+        p = construir_payload(fila(debito="100.00", credito=""), m)
+        assert "Concepto" not in p["fields"], \
+            "el egreso de %s no deberia llevar Concepto todavia" % tabla
+
+
+# ---------------------------------------------------------------------------
+# Orden por fecha_valor: obligatorio para la cadena de saldos
+# ---------------------------------------------------------------------------
+
+def test_las_filas_se_ordenan_por_fecha_valor_dentro_de_cada_tabla():
+    """Se inserta de la mas antigua a la mas reciente, o el saldo sale mal.
+
+    La formula de Ninox encadena cada fila con la anterior: si entran
+    desordenadas, el saldo se calcula mal y el error se arrastra a todas las
+    siguientes.
+    """
+    desordenadas = [
+        fila(cuenta_no="0300000005399610", referencia="C", fecha_valor="2026-09-03"),
+        fila(cuenta_no="0300000005399610", referencia="A", fecha_valor="2026-08-01"),
+        fila(cuenta_no="0300000005399610", referencia="D", fecha_valor="2026-09-10"),
+        fila(cuenta_no="0300000005399610", referencia="B", fecha_valor="2026-08-15"),
+    ]
+    grupos = agrupar_por_tabla(desordenadas)
+    refs = [f["referencia"] for f in grupos["OD"]]
+    assert refs == ["A", "B", "C", "D"], refs
+
+
+def test_el_orden_tambien_funciona_si_el_csv_paso_por_excel():
+    """Con fechas dd/mm/aaaa el orden debe ser el mismo, no alfabetico."""
+    filas_ddmmyyyy = [
+        fila(referencia="C", fecha_valor="03/09/2026"),
+        fila(referencia="A", fecha_valor="01/08/2026"),
+        fila(referencia="D", fecha_valor="10/09/2026"),
+        fila(referencia="B", fecha_valor="15/08/2026"),
+    ]
+    grupos = agrupar_por_tabla(filas_ddmmyyyy)
+    assert [f["referencia"] for f in grupos["OD"]] == ["A", "B", "C", "D"]
+
+
+def test_con_la_misma_fecha_se_respeta_el_orden_del_fichero():
+    """Ordenacion estable: no se reordenan las filas del mismo dia."""
+    filas_iguales = [
+        fila(referencia="primera", fecha_valor="2026-09-01"),
+        fila(referencia="segunda", fecha_valor="2026-09-01"),
+        fila(referencia="tercera", fecha_valor="2026-09-01"),
+    ]
+    grupos = agrupar_por_tabla(filas_iguales)
+    assert [f["referencia"] for f in grupos["OD"]] == ["primera", "segunda", "tercera"]
+
+
+def test_las_filas_sin_fecha_van_al_final():
+    """Una fecha ilegible no debe descolocar la cadena de las que si la tienen."""
+    mezcla = [
+        fila(referencia="sin-fecha", fecha_valor=""),
+        fila(referencia="antigua", fecha_valor="2026-08-01"),
+        fila(referencia="nueva", fecha_valor="2026-09-01"),
+    ]
+    grupos = agrupar_por_tabla(mezcla)
+    assert [f["referencia"] for f in grupos["OD"]] == ["antigua", "nueva", "sin-fecha"]
 
 
 # ---------------------------------------------------------------------------

@@ -114,17 +114,18 @@ class AplicacionBFI(ttk.Frame):
         self.var_simular = tk.BooleanVar(value=True)
         self.var_omitir_dup = tk.BooleanVar(value=True)
         self.var_verificar = tk.BooleanVar(value=True)
-        self.var_corregir = tk.BooleanVar(value=True)
         ttk.Checkbutton(marco3, text="Modo simulacion (no escribe nada en Ninox)",
                         variable=self.var_simular).grid(row=0, column=0, sticky="w")
         ttk.Checkbutton(marco3, text="Omitir las lineas que ya existen en Ninox",
                         variable=self.var_omitir_dup).grid(row=1, column=0, sticky="w")
         ttk.Checkbutton(marco3, text="Comprobar cada registro tras insertarlo",
                         variable=self.var_verificar).grid(row=2, column=0, sticky="w")
-        ttk.Checkbutton(marco3,
-                        text="Corregir los campos que Ninox descarte en el alta "
-                             "(segundo envio)",
-                        variable=self.var_corregir).grid(row=3, column=0, sticky="w")
+        ttk.Label(marco3, foreground="#555", wraplength=760, justify="left",
+                  text="El campo «Saldo inicial» NO se escribe: lo calcula Ninox al "
+                       "crear cada registro, encadenando con la fila anterior. Por "
+                       "eso las lineas se insertan siempre de la mas antigua a la "
+                       "mas reciente."
+                  ).grid(row=3, column=0, sticky="w", pady=(6, 0))
 
         # --- 4. ejecucion: primero leer, despues volcar ---
         marco4 = ttk.Frame(self)
@@ -460,7 +461,6 @@ class AplicacionBFI(ttk.Frame):
             simular=simular,
             omitir_duplicados=self.var_omitir_dup.get(),
             verificar=self.var_verificar.get(),
-            corregir=self.var_corregir.get() and self.var_verificar.get(),
         )
 
         # --- Informe al usuario ---
@@ -506,15 +506,9 @@ class AplicacionBFI(ttk.Frame):
             partes.append("\n%d linea(s) fallaron. Detalle en el registro y en "
                           "la carpeta logs." % resultado.erroneos)
         discrepancias = [d for t in resultado.tablas for d in t.discrepancias]
-        corregidos = [c for t in resultado.tablas for c in t.corregidos]
-        if corregidos:
-            partes.append("\n%d campo(s) se habian quedado con el valor por defecto "
-                          "de Ninox y se corrigieron con un segundo envio "
-                          "(detalle en el registro)." % len(corregidos))
         if discrepancias:
-            partes.append("\n%d campo(s) no se pudieron guardar (Ninox los calcula "
-                          "y no admite escritura). Detalle en el registro."
-                          % len(discrepancias))
+            partes.append("\n%d campo(s) no se guardaron como se envio. Detalle en "
+                          "el registro y en la carpeta logs." % len(discrepancias))
         if resultado.simulado and resultado.insertados:
             partes.append("\nPara escribir de verdad, desmarca «Modo simulacion» "
                           "y vuelve a pulsar «Volcar a Ninox».")

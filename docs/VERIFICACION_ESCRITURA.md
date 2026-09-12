@@ -245,7 +245,7 @@ blanco, y con `Egreso/Ingreso` correcto (`true`, `false`, `true`).
 | Hallazgo | Decisión |
 |---|---|
 | La API acepta ids, pero un nombre mal escrito da HTTP 500 | Se traduce el mapeo a nombres contra los metadatos reales y se aborta el lote si algo no cuadra. |
-| `Saldo inicial` se queda con el valor por defecto en el alta, pero acepta `PUT` | Relectura de cada registro + reenvío opcional de los campos descartados. |
+| `Saldo inicial` se queda con un valor calculado por Ninox en el alta | **La aplicación NO lo escribe nunca.** Lo calcula una fórmula encadenando con la fila anterior. Ver §8. |
 | `Secuencial` y `Conciliado` se auto-rellenan | No se envían y no se interpretan como datos propios. |
 | El documento dice «Tipo de Cambio en blanco» en OD y PD | Se **omite** el campo en lugar de enviarlo vacío: el `PUT` hace *merge* y enviarlo vacío podría borrar un valor calculado por otro proceso. |
 | No hay campo `cuenta` en ninguna de las tres tablas | La cuenta **no se escribe**; sirve para enrutar la línea a su tabla. La referencia del banco queda en `Referencia`. |
@@ -284,3 +284,48 @@ comprobó después de cada ensayo.
 > **Aviso para quien repita esto.** `DF` es la tabla auxiliar del ERP; si otro
 > proceso la usa como banco de pruebas, comprobar su contenido antes y después.
 > Las sondas identifican lo que crean por el `id` de la respuesta del `POST`.
+
+
+---
+
+## 8. El saldo: lo calcula Ninox, y el orden importa (12/09/2026)
+
+Esta sección **corrige y sustituye** la conclusión de la §3. La §3 medía bien
+(un `PUT` guardaba el saldo que se le enviara), pero de ahí se dedujo una
+solución equivocada: corregir el saldo con un `PUT`.
+
+### Lo que se midió, en la tabla TD de producción
+
+Se creó un registro de ingreso por API, **sin enviar el saldo**, y se comparó con
+la fila anterior:
+
+```
+Fila anterior (id 956):  Saldo inicial 23.230,16  −  Importe 4,03  =  23.226,13
+El registro nuevo (962)  recibió:                                        23.226,13
+                                                            ✅ COINCIDE
+```
+
+No era un valor por defecto ni una constante: **la fórmula de Ninox había
+encadenado el saldo con la fila anterior**. Se descartó antes que viniera de la
+tabla copiada `BFI 61021` (DF), donde el `Secuencial` máximo era 4 y no existía
+ningún registro 884.
+
+### Consecuencias, y por qué la aplicación ya no toca ese campo
+
+1. **El saldo es de Ninox.** Escribirlo tapa su cálculo; corregirlo con un `PUT`
+   deja la fila fuera de la cadena y **contamina todas las siguientes**.
+2. **El orden de inserción es obligatorio**: de la fecha más antigua a la más
+   reciente, o el saldo se calcula mal.
+3. **El booleano `Egreso/Ingreso` decide si suma o resta**, así que tiene que
+   estar bien en cada fila.
+4. **`Concepto = 11` («Ingresos recibidos») es obligatorio en los ingresos**,
+   porque la fórmula del saldo depende de ese campo. Sin él, el saldo no se
+   calcula.
+
+### Cambios en la aplicación
+
+- El campo `O` (`Saldo inicial`) **no se envía nunca**, ni en el alta ni con un
+  `PUT`. La corrección posterior se ha eliminado por completo.
+- Las líneas se ordenan por `fecha_valor` antes de insertarse.
+- Los ingresos llevan `Concepto = "11"`.
+- La verificación posterior **no compara** los campos que calcula Ninox.

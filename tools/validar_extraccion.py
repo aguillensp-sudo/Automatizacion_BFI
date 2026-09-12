@@ -131,18 +131,20 @@ def main() -> int:
                 print(s)
 
     # --- 4. Signo que se escribira en Ninox --------------------------------
-    print("\n=== 4. SIGNO ESCRITO EN NINOX (Egreso/Ingreso) ===")
+    print("\n=== 4. SIGNO Y CONCEPTO ESCRITOS EN NINOX ===")
     # Mapa id->nombre simulado con los nombres reales de las tablas destino.
     nombres = {
         "OD": {"B": "Fecha Bancaria", "R1": "Referencia", "G1": "Detalles",
                "D": "Importe CUP", "O": "Saldo inicial", "F": "Egreso/Ingreso",
-               "O1": "Oper. en tránsito", "Q1": "Factura", "J": "Tipo de Cambio"},
+               "O1": "Oper. en tránsito", "C": "Concepto", "Q1": "Factura",
+               "J": "Tipo de Cambio"},
         "PD": {"B": "Fecha Bancaria", "P1": "Referencia", "G1": "Detalles",
                "D": "Importe CUP", "O": "Saldo inicial", "F": "Egreso/Ingreso",
-               "M1": "Oper. en tránsito", "O1": "Factura", "J": "Tipo de Cambio"},
+               "M1": "Oper. en tránsito", "C": "Concepto", "O1": "Factura",
+               "J": "Tipo de Cambio"},
         "TD": {"B": "Fecha Bancaria", "S1": "Referencia", "K1": "Detalles",
                "D": "Importe USD", "O": "Saldo inicial", "F": "Egreso/Ingreso",
-               "Q1": "Oper. en tránsito", "R1": "Factura",
+               "Q1": "Oper. en tránsito", "C": "Concepto", "R1": "Factura",
                "J": "Tipo de Cambio CUP-USD", "C1": "Tipo de Cambio USD-EUR"},
     }
     ingresos = 0
@@ -160,11 +162,23 @@ def main() -> int:
         if real != esperado:
             fallos.append("signo invertido en %s: Egreso/Ingreso=%s con debito=%r credito=%r"
                           % (r["referencia"], real, r["debito"], r["credito"]))
-        if real is True:
+        # Los ingresos deben llevar Concepto = 11 (Ingresos recibidos), porque la
+        # formula de Ninox que calcula el saldo depende de ese campo.
+        if esperado:
             ingresos += 1
+            if payload["fields"].get("Concepto") != config.CONCEPTO_INGRESO:
+                fallos.append("ingreso %s sin Concepto %s (tiene %r)"
+                              % (r["referencia"], config.CONCEPTO_INGRESO,
+                                 payload["fields"].get("Concepto")))
+        # El saldo NO se debe enviar nunca: lo calcula Ninox.
+        if "Saldo inicial" in payload["fields"]:
+            fallos.append("se esta enviando 'Saldo inicial' en %s: lo calcula Ninox"
+                          % r["referencia"])
     print("   lineas con Egreso/Ingreso = True  (ingresos, toggle azul): %d" % ingresos)
     print("   lineas con Egreso/Ingreso = False (egresos,  toggle gris): %d"
           % (len(filas) - ingresos))
+    print("   los %d ingresos llevan Concepto = %s" % (ingresos, config.CONCEPTO_INGRESO))
+    print("   'Saldo inicial' no se envia en ninguna linea (lo calcula Ninox)")
 
     # --- Veredicto ---------------------------------------------------------
     print()
