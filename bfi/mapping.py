@@ -289,6 +289,44 @@ def importe_de_fila(fila: Dict[str, str]):
     return None, None
 
 
+def nombre_de_opcion(metadatos: Dict[str, Any], campo: str, valor: Any) -> Optional[str]:
+    """Devuelve el TEXTO de la opcion de un ``choice``, a partir de su id.
+
+    Ninox lee siempre el texto de un ``choice`` aunque se le haya enviado el id.
+    Esto permite comparar lo enviado con lo guardado sin falsos avisos.
+    """
+    for f in metadatos.get("fields", []):
+        if f.get("name") != campo:
+            continue
+        for opcion in f.get("choices", []) or []:
+            if str(opcion.get("id")) == str(valor):
+                return opcion.get("caption")
+        return None
+    return None
+
+
+def valores_equivalentes(guardado: Any, enviado: Any) -> bool:
+    """?El valor leido y el enviado son el mismo, aunque se escriban distinto?
+
+    Ninox escribe y lee los ``choice`` de forma asimetrica: **se envian con el id
+    o con el texto, pero SIEMPRE se leen como el texto**. Ese caso no se puede
+    resolver aqui (hace falta el catalogo de opciones del campo), asi que lo
+    resuelve el llamante con ``nombre_de_opcion`` antes de comparar. Esta funcion
+    cubre el resto: numeros con tolerancia, booleanos y cadenas sin espacios.
+    """
+    if enviado is None or guardado is None:
+        return guardado == enviado
+    if guardado == enviado:
+        return True
+    if isinstance(enviado, bool) or isinstance(guardado, bool):
+        return bool(guardado) == bool(enviado)
+    if isinstance(enviado, (int, float)) and isinstance(guardado, (int, float)):
+        return abs(float(guardado) - float(enviado)) < 0.005
+    if isinstance(enviado, str) and isinstance(guardado, str):
+        return enviado.strip() == guardado.strip()
+    return False
+
+
 def construir_payload(fila: Dict[str, str], mapeo: MapeoResuelto) -> Dict[str, Any]:
     """Payload de Ninox ``{"fields": {...}}`` para una fila del CSV.
 

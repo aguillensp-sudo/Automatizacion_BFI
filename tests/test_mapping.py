@@ -19,8 +19,9 @@ from bfi.extractor import (FIELDNAMES, fmt_date,          # noqa: E402
                            parse_amount)
 from bfi.mapping import (ErrorDeMapeo, agrupar_por_tabla,  # noqa: E402
                          clave_duplicado, construir_payload, importe_de_fila,
-                         leer_csv, marcar_duplicados, normalizar_fecha,
-                         resolver_mapeo)
+                         leer_csv, marcar_duplicados, nombre_de_opcion,
+                         normalizar_fecha, resolver_mapeo,
+                         valores_equivalentes)
 
 # Campos en ids, tal y como los devuelve la API (recorte de los reales).
 CAMPOS_OD = {"B": "Fecha Bancaria", "R1": "Referencia", "G1": "Detalles",
@@ -295,12 +296,29 @@ def test_un_ingreso_lleva_concepto_11_en_las_tres_tablas():
 
 
 def test_un_egreso_no_lleva_concepto():
-    """De momento solo esta definido el valor para ingresos."""
-    for tabla, campos in (("OD", CAMPOS_OD), ("PD", CAMPOS_PD), ("TD", CAMPOS_TD)):
+    """Un egreso no escribe Concepto. Es el comportamiento definitivo.
+
+    Confirmado por el usuario el 12/09/2026: en los egresos no hay que escribir
+    ese campo. Solo los ingresos llevan Concepto = 11, porque es lo que necesita
+    la formula de Ninox que calcula el saldo.
+    """
+    for tabla, campos in MAPAS.items():
         m = resolver_mapeo(tabla, campos)
         p = construir_payload(fila(debito="100.00", credito=""), m)
         assert "Concepto" not in p["fields"], \
-            "el egreso de %s no deberia llevar Concepto todavia" % tabla
+            "el egreso de %s no debe llevar Concepto" % tabla
+
+
+def test_un_egreso_sigue_llevando_todo_lo_demas():
+    """Que no lleve Concepto no debe dejar la fila a medias."""
+    m = resolver_mapeo("TD", CAMPOS_TD)
+    p = construir_payload(fila(debito="100.00", credito=""), m)
+    esperados = {"Fecha Bancaria", "Referencia", "Detalles", "Factura",
+                 "Importe USD", "Egreso/Ingreso", "Oper. en tránsito",
+                 "Tipo de Cambio CUP-USD", "Tipo de Cambio USD-EUR"}
+    assert esperados <= set(p["fields"]), \
+        "faltan campos en el egreso: %s" % (esperados - set(p["fields"]))
+    assert p["fields"]["Egreso/Ingreso"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -357,6 +375,50 @@ def test_las_filas_sin_fecha_van_al_final():
     ]
     grupos = agrupar_por_tabla(mezcla)
     assert [f["referencia"] for f in grupos["OD"]] == ["antigua", "nueva", "sin-fecha"]
+
+
+# ---------------------------------------------------------------------------
+# Verificacion posterior: los 'choice' se leen como TEXTO
+# ---------------------------------------------------------------------------
+
+def test_un_choice_enviado_por_id_y_leido_por_texto_no_es_un_error():
+    """Aviso falso real que salio en produccion el 12/09/2026.
+
+    Se envio ``Concepto = '11'`` y Ninox devolvio ``'Ingresos recibidos'``. La
+    comprobacion posterior lo dio por fallido y el usuario vio un mensaje de
+    error tras un volcado que en realidad habia ido bien.
+    """
+    metadatos = {"fields": [
+        {"name": "Concepto", "type": "choice",
+         "choices": [{"id": 11, "caption": "Ingresos recibidos"},
+                     {"id": 1, "caption": "Aguas de La Habana"}]},
+    ]}
+    assert nombre_de_opcion(metadatos, "Concepto", "11") == "Ingresos recibidos"
+    assert valores_equivalentes("Ingresos recibidos", "Ingresos recibidos")
+
+
+@pytest.mark.parametrize("guardado,enviado,esperado", [
+    (7992, 7992.0, True),                  # numero int contra float
+    (7992.004, 7992.0, True),              # dentro de la tolerancia
+    (7992.01, 7992.0, False),              # fuera de la tolerancia
+    (True, True, True),
+    (False, False, True),
+    (True, False, False),
+    ("No", "No", True),
+    ("No", " Sí", False),
+    ("", "", True),
+    (None, None, True),
+    (5, "5", False),                       # texto contra numero: no se asume
+])
+def test_comparacion_de_valores(guardado, enviado, esperado):
+    assert valores_equivalentes(guardado, enviado) is esperado
+
+
+def test_nombre_de_opcion_con_un_valor_que_no_existe():
+    metadatos = {"fields": [{"name": "Concepto", "type": "choice",
+                             "choices": [{"id": 11, "caption": "Ingresos recibidos"}]}]}
+    assert nombre_de_opcion(metadatos, "Concepto", "99") is None
+    assert nombre_de_opcion(metadatos, "OtroCampo", "11") is None
 
 
 # ---------------------------------------------------------------------------
