@@ -19,7 +19,8 @@ from bfi.extractor import (FIELDNAMES, fmt_date,          # noqa: E402
                            parse_amount)
 from bfi.mapping import (ErrorDeMapeo, agrupar_por_tabla,  # noqa: E402
                          clave_duplicado, construir_payload, importe_de_fila,
-                         leer_csv, marcar_duplicados, resolver_mapeo)
+                         leer_csv, marcar_duplicados, normalizar_fecha,
+                         resolver_mapeo)
 
 # Campos en ids, tal y como los devuelve la API (recorte de los reales).
 CAMPOS_OD = {"B": "Fecha Bancaria", "R1": "Referencia", "G1": "Detalles",
@@ -186,6 +187,46 @@ def test_una_fila_sin_fecha_aborta():
     m = resolver_mapeo("OD", CAMPOS_OD)
     with pytest.raises(ErrorDeMapeo):
         construir_payload(fila(fecha_valor=""), m)
+
+
+# ---------------------------------------------------------------------------
+# Fechas: el CSV puede haber pasado por Excel
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("entrada,esperado", [
+    ("2026-07-08", "2026-07-08"),          # como lo escribe el extractor
+    ("2026-7-8", "2026-07-08"),            # ISO sin ceros
+    ("08/07/2026", "2026-07-08"),          # como lo deja Excel en espanol
+    ("8/7/2026", "2026-07-08"),
+    ("08-07-2026", "2026-07-08"),
+    ("08/07/26", "2026-07-08"),
+])
+def test_las_fechas_se_normalizan_a_iso(entrada, esperado):
+    assert normalizar_fecha(entrada) == esperado
+
+
+@pytest.mark.parametrize("entrada", ["", "   ", "no es una fecha", "2026/07/08"])
+def test_una_fecha_ilegible_no_inventa_nada(entrada):
+    assert normalizar_fecha(entrada) == ""
+
+
+def test_un_csv_guardado_desde_excel_se_envia_con_fecha_iso():
+    """Si el CSV paso por Excel, la fecha debe llegar a Ninox en ISO igualmente.
+
+    Sin esto, Excel convertiria las fechas a 08/07/2026 y Ninox no las
+    reconoceria: el volcado fallaria sin que el usuario supiera por que.
+    """
+    m = resolver_mapeo("TD", CAMPOS_TD)
+    p = construir_payload(
+        fila(cuenta_no="0300000006102035", fecha_valor="08/07/2026"), m)
+    assert p["fields"]["Fecha Bancaria"] == "2026-07-08"
+
+
+def test_una_fecha_ilegible_aborta_la_fila_con_un_mensaje_util():
+    m = resolver_mapeo("TD", CAMPOS_TD)
+    with pytest.raises(ErrorDeMapeo) as info:
+        construir_payload(fila(fecha_valor="17 de julio"), m)
+    assert "Excel" in str(info.value), "el mensaje debe explicar las dos formas validas"
 
 
 # ---------------------------------------------------------------------------
