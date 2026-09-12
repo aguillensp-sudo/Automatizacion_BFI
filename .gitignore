@@ -37,3 +37,7 @@ credenciales*.txt
 # terceros (cuentas, importes, beneficiarios). No se publican, igual que el CSV
 # que se genera a partir de ellos. Se quedan en el disco de quien los procesa.
 *.pdf
+# La carpeta de la aplicacion compilada (el .exe, _internal con las DLL y las
+# Tcl/Tk, los logs y el CSV). Son ~1100 archivos de binarios reproducibles con
+# build_exe.bat: no se versionan. Se colaron una vez por error.
+BFI Extractor/
