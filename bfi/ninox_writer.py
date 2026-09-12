@@ -25,7 +25,9 @@ from .mapping import (
     MapeoResuelto,
     construir_payload,
     marcar_duplicados,
+    nombre_de_opcion,
     resolver_mapeo,
+    valores_equivalentes,
 )
 from .ninox_client import NinoxClient, NinoxError
 
@@ -273,10 +275,15 @@ class EscritorNinox:
             real = campos.get(nombre, None)
             if real is None and valor == "":
                 continue                      # vacio enviado, vacio guardado
-            if isinstance(valor, float) and isinstance(real, (int, float)):
-                if abs(float(real) - valor) < 0.005:
-                    continue
-            elif real == valor:
+            # Los choice se envian con el id pero se leen como TEXTO, asi que hay
+            # que traducir el id a su texto antes de comparar. Sin esto salia un
+            # aviso falso en cada registro con Concepto.
+            esperado = valor
+            if isinstance(valor, (str, int)):
+                texto = nombre_de_opcion(self.cli.get_table(tabla), nombre, valor)
+                if texto is not None:
+                    esperado = texto
+            if valores_equivalentes(real, esperado):
                 continue
             discrepancias.append(
                 "registro %s de %s: '%s' se envio %r y quedo %r"
