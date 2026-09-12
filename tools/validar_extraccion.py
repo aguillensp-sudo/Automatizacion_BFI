@@ -152,15 +152,19 @@ def main() -> int:
             fallos.append("cuenta desconocida: %s" % r["cuenta_no"])
             continue
         payload = construir_payload(r, resolver_mapeo(tabla, nombres[tabla]))
-        esperado = _num(r["debito"]) is not None
+        # Booleano de Ninox, VERIFICADO el 12/09/2026:
+        #   credito -> True  (toggle azul, Ingreso)
+        #   debito  -> False (toggle gris, Egreso)
+        esperado = _num(r["credito"]) is not None
         real = payload["fields"]["Egreso/Ingreso"]
         if real != esperado:
             fallos.append("signo invertido en %s: Egreso/Ingreso=%s con debito=%r credito=%r"
                           % (r["referencia"], real, r["debito"], r["credito"]))
-        if real is False:
+        if real is True:
             ingresos += 1
-    print("   lineas con Egreso/Ingreso = False (ingresos): %d" % ingresos)
-    print("   lineas con Egreso/Ingreso = True  (egresos) : %d" % (len(filas) - ingresos))
+    print("   lineas con Egreso/Ingreso = True  (ingresos, toggle azul): %d" % ingresos)
+    print("   lineas con Egreso/Ingreso = False (egresos,  toggle gris): %d"
+          % (len(filas) - ingresos))
 
     # --- Veredicto ---------------------------------------------------------
     print()

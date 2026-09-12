@@ -125,26 +125,30 @@ def test_una_cuenta_desconocida_aborta():
 # importe y egreso/ingreso
 # ---------------------------------------------------------------------------
 
-def test_debito_es_egreso_y_credito_es_ingreso():
-    """Deja escrito, sin ambiguedad, que significa el booleano.
+def test_credito_es_ingreso_azul_y_debito_es_egreso_gris():
+    """Mapeo del booleano, VERIFICADO EN NINOX el 12/09/2026.
 
-    El nombre del campo ("Egreso/Ingreso") invita a confundirse: el Si/No se
-    refiere a **Egreso**, no a Ingreso. Por eso se comprueba aqui de forma
-    explicita, porque el usuario llego a dudar de si estaba invertido.
+    Se comprobo mirando el toggle del campo junto al valor que la API devuelve:
 
-        debito  -> sale dinero  -> es egreso -> True  ("Si")
-        credito -> entra dinero -> no es egreso -> False ("No")
+        credito (entra dinero) -> True  -> toggle AZUL (derecha)  = Ingreso
+        debito  (sale dinero)  -> False -> toggle GRIS (izquierda) = Egreso
+
+    El apartado 5.2 del documento funcional decia lo contrario ("debito -> Si /
+    credito -> No"): esa transcripcion estaba invertida, y este mapeo la
+    sustituye. La prueba fija el mapeo CORRECTO para que nadie lo "arregle" por
+    error leyendo el documento viejo.
     """
     m = resolver_mapeo("OD", CAMPOS_OD)
-    p = construir_payload(fila(debito="43918.88", credito=""), m)
-    assert p["fields"]["Importe CUP"] == 43918.88
-    assert p["fields"]["Egreso/Ingreso"] is True, \
-        "un debito (sale dinero) es un EGRESO: True = Si"
 
     p = construir_payload(fila(debito="", credito="500.25"), m)
     assert p["fields"]["Importe CUP"] == 500.25
+    assert p["fields"]["Egreso/Ingreso"] is True, \
+        "un credito es un INGRESO: True -> toggle azul"
+
+    p = construir_payload(fila(debito="43918.88", credito=""), m)
+    assert p["fields"]["Importe CUP"] == 43918.88
     assert p["fields"]["Egreso/Ingreso"] is False, \
-        "un credito (entra dinero) NO es un egreso: False = No"
+        "un debito es un EGRESO: False -> toggle gris"
 
 
 def test_debito_y_credito_a_la_vez_es_un_error():
@@ -250,8 +254,9 @@ def test_deteccion_de_duplicados_por_referencia_fecha_e_importe():
     repetida = fila(referencia="EXISTE-1", debito="100.00")
     resultado = marcar_duplicados(
         [nueva, repetida],
+        # Un debito es egreso -> False (ver el mapeo verificado mas arriba).
         [{"Referencia": "EXISTE-1", "Fecha Bancaria": "2026-07-01",
-          "Importe CUP": 100.0, "Egreso/Ingreso": True}],
+          "Importe CUP": 100.0, "Egreso/Ingreso": False}],
         m)
     assert resultado[0]["_duplicado"] is False
     assert resultado[1]["_duplicado"] is True
@@ -303,14 +308,14 @@ def test_el_csv_real_tiene_ingresos_y_el_recuento_es_explicito():
 
 
 def test_cada_linea_del_csv_real_escribe_el_signo_correcto():
-    """El ingreso va como Egreso/Ingreso = False y su importe en el campo D."""
+    """El ingreso va como Egreso/Ingreso = True (toggle azul) y su importe en D."""
     for fila_csv in _csv_real():
         tabla, campos = CUENTA_A_TABLA[fila_csv["cuenta_no"]]
         m = resolver_mapeo(tabla, campos)
         p = construir_payload(fila_csv, m)
         campo_importe = m.nombre("importe")
         es_ingreso = bool((fila_csv.get("credito") or "").strip())
-        assert p["fields"]["Egreso/Ingreso"] is (not es_ingreso), \
+        assert p["fields"]["Egreso/Ingreso"] is es_ingreso, \
             "signo equivocado en la referencia %s" % fila_csv["referencia"]
         valor = p["fields"][campo_importe]
         if es_ingreso:
