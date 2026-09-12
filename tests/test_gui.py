@@ -235,7 +235,9 @@ def test_la_ventana_arranca_con_las_opciones_en_su_sitio(monkeypatch, tmp_path, 
             "el modo simulacion debe venir activado: es la red de seguridad"
         assert v.app.var_omitir_dup.get() is True
         assert v.app.var_verificar.get() is True
-        assert v.app.var_corregir.get() is True
+        assert not hasattr(v.app, "var_corregir"), \
+            "ya no hay correccion con PUT: el unico campo que se corregia (el " \
+            "saldo) lo calcula Ninox y no se debe escribir"
         assert tuple(v.app.tabla["columns"]) == ("tabla", "lineas", "nuevas", "duplicadas")
         assert "iniciado" in v.texto_registro, \
             "la caja de registro debe recibir las lineas del registro de la app"

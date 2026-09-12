@@ -59,9 +59,10 @@ MAPEO_POR_TABLA = {
         "referencia": "R1",    # Referencia
         "detalle": "G1",       # Detalles
         "importe": "D",        # Importe CUP
-        "saldo": "O",          # Saldo inicial
         "egreso_ingreso": "F",  # Egreso/Ingreso (booleano)
         "oper_transito": "O1",  # Oper. en transito (choice No/Si)
+        "concepto": "C",      # Concepto (choice)
+        "saldo": "O",         # Saldo inicial -> NO se escribe, lo calcula Ninox
         "factura": "Q1",       # Factura (texto)
         "tipo_cambio": "J",    # Tipo de Cambio
         "tipo_cambio_eur": None,
@@ -71,9 +72,10 @@ MAPEO_POR_TABLA = {
         "referencia": "P1",    # Referencia
         "detalle": "G1",       # Detalles
         "importe": "D",        # Importe CUP
-        "saldo": "O",          # Saldo inicial
         "egreso_ingreso": "F",
         "oper_transito": "M1",  # Oper. en transito
+        "concepto": "C",
+        "saldo": "O",         # Saldo inicial -> NO se escribe, lo calcula Ninox
         "factura": "O1",       # Factura (texto)
         "tipo_cambio": "J",
         "tipo_cambio_eur": None,
@@ -83,9 +85,10 @@ MAPEO_POR_TABLA = {
         "referencia": "S1",    # Referencia
         "detalle": "K1",       # Detalles
         "importe": "D",        # Importe USD
-        "saldo": "O",
         "egreso_ingreso": "F",
         "oper_transito": "Q1",  # Oper. en transito
+        "concepto": "C",
+        "saldo": "O",         # Saldo inicial -> NO se escribe, lo calcula Ninox
         "factura": "R1",       # Factura (texto)
         "tipo_cambio": "J",    # Tipo de Cambio CUP-USD  -> 24 (fijo)
         "tipo_cambio_eur": "C1",  # Tipo de Cambio USD-EUR -> en blanco
@@ -100,14 +103,24 @@ MAPEO_POR_TABLA = {
         "referencia": "S1",
         "detalle": "K1",
         "importe": "D",
-        "saldo": "O",
         "egreso_ingreso": "F",
         "oper_transito": "Q1",
+        "concepto": "C",
+        "saldo": "O",
         "factura": "R1",
         "tipo_cambio": "J",
         "tipo_cambio_eur": "C1",
     },
 }
+
+# Valor de "Concepto" que debe llevar SIEMPRE una linea de ingreso (credito).
+# Vale para las tres tablas: en OD, PD y TD el campo Concepto es el id "C" y la
+# opcion id 11 es "Ingresos recibidos". Confirmado leyendo los metadatos de las
+# tres tablas el 12/09/2026.
+#
+# Es obligatorio porque la formula de Ninox que calcula "Saldo inicial" depende
+# de este campo: sin el, el saldo no se calcula.
+CONCEPTO_INGRESO = "11"
 
 # Aplica a OD y PD: "Tipo de Cambio = siempre en blanco" (apartado 5.2).
 # Se OMITE el campo en lugar de enviarlo vacio: el PUT hace merge y asi no se
@@ -115,6 +128,14 @@ MAPEO_POR_TABLA = {
 TIPO_CAMBIO_FIJO_TD = 24
 
 OPER_TRANSITO_NO = "No"
+
+# "Saldo inicial" (campo O) NO se escribe NUNCA. Lo calcula una formula de Ninox
+# al crear el registro, encadenando con la fila anterior. Verificado el
+# 12/09/2026 en la tabla TD de produccion: el registro nuevo recibio
+# 23230.16 - 4.03 = 23226.13, exactamente el saldo final de la fila anterior.
+# Si la aplicacion lo escribiera, taparia ese calculo, y si lo corrigiera con un
+# PUT dejaria la fila fuera de la cadena y contaminaria las siguientes.
+CAMPOS_QUE_CALCULA_NINOX = ("Saldo inicial",)
 
 # ---------------------------------------------------------------------------
 # Ficheros

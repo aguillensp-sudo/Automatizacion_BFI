@@ -68,8 +68,10 @@ class MapeoResuelto:
 
 
 # Orden de los campos en el payload, para que los informes sean legibles.
-_CLAVES = ("fecha_valor", "referencia", "detalle", "importe",
-           "saldo", "egreso_ingreso", "oper_transito", "factura",
+# "saldo" entra en la lista para poder resolverlo e informar de que SE OMITE
+# (lo calcula Ninox), aunque nunca se escriba.
+_CLAVES = ("fecha_valor", "referencia", "detalle", "importe", "saldo",
+           "egreso_ingreso", "oper_transito", "concepto", "factura",
            "tipo_cambio", "tipo_cambio_eur")
 
 
@@ -140,6 +142,15 @@ def leer_csv(ruta: str) -> List[Dict[str, str]]:
 def agrupar_por_tabla(filas: Iterable[Dict[str, str]]) -> Dict[str, List[Dict[str, str]]]:
     """Agrupa las filas del CSV por tabla Ninox destino, segun ``cuenta_no``.
 
+    **Dentro de cada tabla, las filas quedan ordenadas por ``fecha_valor`` de mas
+    antigua a mas reciente.** El orden no es cosmetico: la formula de Ninox que
+    calcula "Saldo inicial" encadena cada fila con la anterior, asi que si se
+    insertan desordenadas el saldo sale mal y **el error se arrastra a todas las
+    siguientes**. Requisito confirmado por el usuario el 12/09/2026.
+
+    Ante fechas iguales se respeta el orden del fichero (ordenacion estable), que
+    es el de los extractos.
+
     Lanza ``ErrorDeMapeo`` si aparece una cuenta que no esta en el mapa: es
     mejor parar que insertar en la tabla equivocada.
     """
@@ -160,7 +171,23 @@ def agrupar_por_tabla(filas: Iterable[Dict[str, str]]) -> Dict[str, List[Dict[st
             "Anade la correspondencia en config.CUENTA_A_TABLA o aparta esos PDFs."
             % (detalle, ", ".join(sorted(config.CUENTA_A_TABLA)))
         )
+    for tabla, lista in grupos.items():
+        grupos[tabla] = ordenar_por_fecha_valor(lista)
     return grupos
+
+
+def ordenar_por_fecha_valor(filas: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Ordena por ``fecha_valor`` de mas antigua a mas reciente (estable).
+
+    Se usa ``normalizar_fecha`` para poder ordenar aunque el CSV haya pasado por
+    Excel (``08/07/2026``). Las filas sin fecha reconocible se mandan al final,
+    para que no descoloquen la cadena de saldos de las que si la tienen.
+    """
+    def clave(fila: Dict[str, str]):
+        fecha = normalizar_fecha(fila.get("fecha_valor"))
+        return (1, "") if not fecha else (0, fecha)
+
+    return sorted(filas, key=clave)
 
 
 # ---------------------------------------------------------------------------
@@ -303,9 +330,19 @@ def construir_payload(fila: Dict[str, str], mapeo: MapeoResuelto) -> Dict[str, A
     if ingreso is not None:
         poner("egreso_ingreso", ingreso)
 
-    saldo = _a_float(fila.get("saldo"))
-    if saldo is not None:
-        poner("saldo", saldo)
+    # --- Concepto: obligatorio en los ingresos ---
+    # La formula de Ninox que calcula "Saldo inicial" depende de este campo, asi
+    # que un ingreso sin Concepto se quedaria sin saldo.
+    if ingreso is True:
+        poner("concepto", config.CONCEPTO_INGRESO)
+
+    # "Saldo inicial" (campo O) NO se envia NUNCA: lo calcula una formula de
+    # Ninox encadenando con la fila anterior. Si se enviara, se taparia ese
+    # calculo. Por eso la columna "saldo" del CSV se lee pero no se usa para
+    # escribir (ver config.CAMPOS_QUE_CALCULA_NINOX).
+    nombre_saldo = mapeo.nombre("saldo")
+    if nombre_saldo:
+        omitidos[nombre_saldo] = "lo calcula una formula de Ninox con la fila anterior"
 
     # --- Reglas fijas del apartado 5.2 ---
     poner("oper_transito", config.OPER_TRANSITO_NO)
