@@ -106,11 +106,25 @@ Hay dos formas, y **ninguna exige una terminal**:
 
 ## 4. Uso diario
 
+El trabajo va **en dos pasos separados**, y esa separación es deliberada: así el
+usuario ve lo que hay antes de que nada se escriba en el ERP.
+
+### Paso 1 — Leer (no escribe nada)
+
 1. Doble clic en **BFI Extractor**.
 2. **«Elegir carpeta…»** → la carpeta con los PDFs del banco.
-3. Revisar la tabla de *Contenido detectado*: líneas por tabla y cuántas ya
-   existen.
-4. Pulsar **«Procesar y volcar a Ninox»**.
+   Nada más elegirla, la aplicación **lee los PDFs y rellena la tabla**.
+3. La tabla *Contenido detectado* muestra, por tabla: líneas, cuántas son nuevas
+   y cuántas **ya existen** en Ninox.
+
+### Paso 2 — Volcar
+
+4. El botón **«Volcar a Ninox»** se habilita cuando el contenido está leído.
+   Pulsarlo inserta (o simula) esas líneas.
+
+> Con la carpeta elegida, el botón «Volcar a Ninox» está **deshabilitado** hasta
+> que se lee el contenido. Es intencionado: evita que alguien intente volcar una
+> carpeta que aún no se ha leído, o la carpeta anterior.
 
 Opciones de la ventana:
 
@@ -126,7 +140,13 @@ sobre pocas líneas**, para que el usuario vea el resultado en el ERP antes de
 lanzar un extracto completo.
 
 El botón **«Solo extraer a CSV (sin Ninox)»** genera el CSV y no toca el ERP
-(útil sin conexión o para revisar antes).
+(útil sin conexión o para revisar antes). Ese CSV se escribe **en la carpeta
+elegida**, junto a los PDFs.
+
+> **Recomendación de organización:** guarda los extractos en una carpeta aparte
+> (por ejemplo `Documentos\Extractos BFI`), no junto al programa. Mezclar los
+> PDFs con `BFI Extractor.exe` y `_internal` funciona, pero acaba siendo un lío y
+> el CSV generado aparece en medio del programa.
 
 ---
 

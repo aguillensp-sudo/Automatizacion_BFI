@@ -22,6 +22,7 @@ Uso:
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -35,9 +36,32 @@ from bfi.extractor import listar_pdfs                    # noqa: E402
 
 tk = pytest.importorskip("tkinter", reason="tkinter no disponible")
 
-PDFS = listar_pdfs(str(RAIZ))
+
+def _buscar_pdfs():
+    """Extractos de prueba, buscando en los sitios donde suelen estar.
+
+    Los PDFs son datos reales de clientes y no se versionan, asi que su ubicacion
+    cambia: en el proyecto durante el desarrollo, y en la carpeta de la
+    aplicacion cuando alguien copia el programa para usarlo. Se admite tambien
+    la variable de entorno ``BFI_PDFS`` para apuntar a cualquier otra carpeta.
+    """
+    candidatas = []
+    if os.environ.get("BFI_PDFS"):
+        candidatas.append(Path(os.environ["BFI_PDFS"]))
+    candidatas.append(RAIZ)
+    candidatas.append(RAIZ / "BFI Extractor")
+    for carpeta in candidatas:
+        if carpeta.is_dir():
+            encontrados = listar_pdfs(str(carpeta))
+            if encontrados:
+                return encontrados
+    return []
+
+
+PDFS = _buscar_pdfs()
 sin_pdfs = pytest.mark.skipif(
-    not PDFS, reason="no hay extractos PDF en la carpeta del proyecto")
+    not PDFS,
+    reason="no se han encontrado extractos PDF (pon BFI_PDFS=<carpeta> para indicarlos)")
 
 
 @pytest.fixture(scope="module")
@@ -106,15 +130,16 @@ class VentanaDePrueba:
         self.app._pdfs = listar_pdfs(str(tmp_path)) if con_pdfs else []
         self.app.var_carpeta.set(str(tmp_path))
 
-    def ejecutar_procesar(self):
-        """Ejecuta la tarea del hilo de trabajo y drena la cola.
+    def leer(self):
+        """Primer paso: «Leer PDFs y mostrar el contenido». No escribe en Ninox."""
+        self.app._tarea_leer()
+        self.app._cola.put(("fin", None))
+        self.procesar_cola()
+        return self
 
-        En produccion la tarea corre dentro de ``_envolver``, que al terminar
-        encola ``("fin", None)``; de ese evento depende que se muestre el resumen
-        y que se reactive el boton. Aqui se reproduce igual, porque si no, la
-        prueba comprobaria un camino que nunca ocurre.
-        """
-        self.app._tarea_procesar()
+    def volcar(self):
+        """Segundo paso: «Volcar a Ninox» (en simulacion o de verdad)."""
+        self.app._tarea_volcar()
         self.app._cola.put(("fin", None))
         self.procesar_cola()
         return self
@@ -203,13 +228,69 @@ def test_solo_extraer_genera_el_csv_y_deja_el_fichero(ventana):
 
 
 # ---------------------------------------------------------------------------
-# «Procesar» en modo simulacion: recorre todo y NO escribe
+# Paso 1: «Leer PDFs» rellena la tabla SIN escribir en Ninox
 # ---------------------------------------------------------------------------
 
 @sin_pdfs
-def test_procesar_en_simulacion_recorre_todo_el_flujo(ventana):
+def test_leer_rellena_la_tabla_y_no_toca_ninox(ventana):
+    """Al leer, la tabla debe mostrar el contenido de inmediato.
+
+    Esta prueba existe por un problema real de uso: la ventana decia «20 ficheros
+    PDF encontrados» pero dejaba la tabla vacia hasta pulsar «Procesar», asi que
+    el usuario no sabia si algo habia fallado o si faltaba un paso.
+    """
+    ventana.leer()
+
+    filas = ventana.filas_tabla()
+    assert len(filas) == 3, "deben aparecer OD, PD y TD en la tabla"
+    total = sum(int(f[1]) for f in filas)
+    assert total == 44, "la tabla debe sumar las 44 lineas del extracto"
+
+    # Y sin haber tocado el ERP: no debe aparecer ni la conexion con Ninox.
+    registro = ventana.texto_registro
+    assert "Conexion con Ninox" not in registro
+    assert "Conectando con Ninox" not in registro
+    assert "Mapeo validado" not in registro, "leer no debe conectar con Ninox"
+
+    # El boton de volcar queda disponible solo despues de leer.
+    assert str(ventana.app.btn_volcar["state"]) == "normal"
+    assert "Contenido leido: 44 linea(s)" in ventana.app.lbl_resumen["text"]
+
+
+@sin_pdfs
+def test_volcar_sin_haber_leido_avisa_y_no_hace_nada(monkeypatch, tmp_path, raiz_tk):
+    """Pulsar «Volcar» antes de leer debe avisar, no volcar la carpeta anterior."""
+    destino = tmp_path / "extractos"
+    destino.mkdir()
+    # Se copian PDFs para que el unico motivo del aviso sea no haber leido.
+    for p in PDFS[:2]:
+        (destino / Path(p).name).write_bytes(Path(p).read_bytes())
+
+    v = VentanaDePrueba(monkeypatch, destino, raiz_tk)
+    try:
+        v.procesar_cola()
+        v.mensajes.clear()
+        v.app.volcar()
+        assert v.mensajes, "debe avisarse al usuario"
+        tipo, texto = v.mensajes[-1]
+        assert tipo == "info", v.mensajes
+        assert "leer" in texto.lower(), texto
+        assert str(v.app.btn_volcar["state"]) == "disabled"
+        # Y no debe haber conectado con Ninox ni escrito nada.
+        assert "Conectando con Ninox" not in v.texto_registro
+    finally:
+        v.cerrar()
+
+
+# ---------------------------------------------------------------------------
+# Paso 2: «Volcar» en modo simulacion recorre todo y NO escribe
+# ---------------------------------------------------------------------------
+
+@sin_pdfs
+def test_volcar_en_simulacion_recorre_todo_el_flujo(ventana):
     ventana.app.var_simular.set(True)
-    ventana.ejecutar_procesar()
+    ventana.leer()
+    ventana.volcar()
 
     registro = ventana.texto_registro
     # Los pasos que el usuario debe ver en la caja de registro.
@@ -218,7 +299,7 @@ def test_procesar_en_simulacion_recorre_todo_el_flujo(ventana):
     assert "Mapeo validado para TD" in registro
     assert "MODO SIMULACION" in registro
 
-    # La vista previa debe mostrar las tres tablas con sus recuentos.
+    # La tabla debe seguir mostrando el contenido.
     filas = ventana.filas_tabla()
     assert len(filas) == 3, "deben aparecer OD, PD y TD en la vista previa"
     total = sum(int(f[1]) for f in filas)
@@ -240,7 +321,8 @@ def test_procesar_en_simulacion_recorre_todo_el_flujo(ventana):
 @sin_pdfs
 def test_la_vista_previa_no_marca_duplicados_cuando_no_los_hay(ventana):
     ventana.app.var_simular.set(True)
-    ventana.ejecutar_procesar()
+    ventana.leer()
+    ventana.volcar()
     for _tabla, lineas, nuevas, duplicadas in ventana.filas_tabla():
         assert int(duplicadas) == 0, "no hay duplicados: DF estaba vacia"
         assert int(nuevas) == int(lineas)
@@ -297,7 +379,8 @@ def test_una_segunda_pasada_detecta_lo_ya_insertado(monkeypatch, tmp_path, raiz_
         monkeypatch.setattr(modulo_gui, "EscritorNinox", EscritorDirigido)
 
         v.app.var_simular.set(False)
-        v.ejecutar_procesar()
+        v.leer()
+        v.volcar()
         registro = v.texto_registro
         assert "44 insertada(s), 0 omitida(s), 0 con error" in registro, registro[-900:]
 
@@ -307,9 +390,8 @@ def test_una_segunda_pasada_detecta_lo_ya_insertado(monkeypatch, tmp_path, raiz_
         assert len(creados) == 44, "deberian haberse creado 44 registros nuevos"
 
         # --- Segunda pasada: sus 44 lineas deben salir como duplicadas ---
-        v.app._tarea_procesar()
-        v.app._cola.put(("fin", None))
-        v.procesar_cola()
+        v.leer()
+        v.volcar()
         ultimo = v.texto_registro.split("Leyendo")[-1]
         assert "44 linea(s) ya presentes" in ultimo, ultimo[-900:]
         assert "0 insertada(s), 44 omitida(s)" in ultimo

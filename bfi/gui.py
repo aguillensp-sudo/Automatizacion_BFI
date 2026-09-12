@@ -56,6 +56,8 @@ class AplicacionBFI(ttk.Frame):
         self._escritor: Optional[EscritorNinox] = None
         self._pedir_credenciales = False
         self._motivo_credenciales = ""
+        # Contenido ya leido y mostrado en la tabla, listo para volcar.
+        self._leido = False
 
         self._construir_widgets()
         self.after(120, self._vaciar_cola)
@@ -121,17 +123,20 @@ class AplicacionBFI(ttk.Frame):
                              "(segundo envio)",
                         variable=self.var_corregir).grid(row=3, column=0, sticky="w")
 
-        # --- 4. ejecucion ----------------------------------------------------
+        # --- 4. ejecucion: primero leer, despues volcar ---
         marco4 = ttk.Frame(self)
         marco4.grid(row=3, column=0, sticky="ew", **pad)
         marco4.columnconfigure(0, weight=1)
         self.barra = ttk.Progressbar(marco4, mode="determinate")
         self.barra.grid(row=0, column=0, sticky="ew")
-        self.btn_procesar = ttk.Button(marco4, text="Procesar y volcar a Ninox",
+        self.btn_procesar = ttk.Button(marco4, text="Leer PDFs y mostrar el contenido",
                                        command=self.procesar)
         self.btn_procesar.grid(row=0, column=1, padx=(8, 0))
+        self.btn_volcar = ttk.Button(marco4, text="Volcar a Ninox",
+                                     command=self.volcar, state="disabled")
+        self.btn_volcar.grid(row=0, column=2, padx=(8, 0))
         self.lbl_estado = ttk.Label(marco4, text="Preparado.")
-        self.lbl_estado.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        self.lbl_estado.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         # --- 5. registro -----------------------------------------------------
         marco5 = ttk.LabelFrame(self, text=" Registro de actividad ", padding=6)
@@ -160,6 +165,11 @@ class AplicacionBFI(ttk.Frame):
                     self.lbl_estado.configure(text=dato)
                 elif tipo == "tabla":
                     self._pintar_tabla(dato)
+                elif tipo == "listo_para_volcar":
+                    self.lbl_resumen.configure(
+                        text="Contenido leido: %d linea(s). Pulsa «Volcar a Ninox» "
+                             "cuando quieras insertarlas." % dato,
+                        foreground="#0b6e0b")
                 elif tipo == "popup":
                     self._popup_pendiente = dato
                 elif tipo == "fin":
@@ -186,6 +196,10 @@ class AplicacionBFI(ttk.Frame):
 
     def _ocupado(self, activo: bool, estado: str = "") -> None:
         self.btn_procesar.configure(state="disabled" if activo else "normal")
+        # «Volcar» solo se habilita cuando hay contenido leido y la ventana no
+        # esta trabajando: asi es imposible intentar volcar algo que no existe.
+        self.btn_volcar.configure(
+            state="normal" if (self._leido and not activo) else "disabled")
         self.barra.configure(mode="indeterminate" if activo else "determinate")
         if activo:
             self.barra.start(12)
@@ -203,6 +217,12 @@ class AplicacionBFI(ttk.Frame):
         self._directorio = carpeta
         self.var_carpeta.set(carpeta)
         self._pdfs = listar_pdfs(carpeta)
+        # Al cambiar de carpeta se olvida lo leido antes: si no, se volcaria el
+        # contenido de la carpeta anterior.
+        self._leido = False
+        self._grupos = {}
+        self._limpiar_tabla()
+        self.btn_volcar.configure(state="disabled")
         if not self._pdfs:
             self.lbl_resumen.configure(
                 text="No se han encontrado ficheros .pdf en esa carpeta.",
@@ -211,14 +231,43 @@ class AplicacionBFI(ttk.Frame):
                                    "En esa carpeta no hay ningun fichero .pdf.")
             return
         self.logger.info("Carpeta: %s (%d PDF(s))", carpeta, len(self._pdfs))
+        # Se leen YA, para que el usuario vea el contenido sin tener que pulsar
+        # nada. Al principio solo se ponia un mensaje y la tabla seguia vacia
+        # hasta pulsar «Procesar», lo que hacia dudar de si algo habia fallado.
         self.lbl_resumen.configure(
-            text="%d fichero(s) PDF encontrados. Pulsa «Procesar» para leerlos."
+            text="%d fichero(s) PDF encontrados. Leyendo su contenido..."
                  % len(self._pdfs), foreground="#0b6e0b")
+        self._lanzar(self._tarea_leer, "Leyendo los PDFs...")
+
+    def _limpiar_tabla(self) -> None:
+        for item in self.tabla.get_children():
+            self.tabla.delete(item)
 
     def solo_extraer(self) -> None:
         if not self._comprobar_carpeta():
             return
         self._lanzar(self._tarea_solo_extraer, "Extrayendo PDFs...")
+
+    def volcar(self) -> None:
+        """Segundo paso: escribe en Ninox lo que ya se leyo y se mostro."""
+        if not self._comprobar_carpeta():
+            return
+        if not self._leido:
+            messagebox.showinfo(
+                APP_NAME,
+                "Todavia no se ha leido el contenido de la carpeta.\n\n"
+                "Pulsa antes «Leer PDFs y mostrar el contenido».")
+            return
+        if not self.var_simular.get():
+            if not messagebox.askyesno(
+                    APP_NAME,
+                    "Vas a INSERTAR registros REALES en el ERP Ninox.\n\n"
+                    "Las tablas destino son OD (BFI 05399610), PD (BFI 06074740) "
+                    "y TD (BFI 61020).\n"
+                    "En Ninox no hay transacciones ni deshacer.\n\n"
+                    "¿Continuar?"):
+                return
+        self._lanzar(self._tarea_volcar, "Procesando...")
 
     # ------------------------------------------------------- credenciales
     def _comprobar_credenciales_al_arrancar(self) -> None:
@@ -248,18 +297,10 @@ class AplicacionBFI(ttk.Frame):
                 messagebox.showwarning(APP_NAME, mensaje)
 
     def procesar(self) -> None:
+        """Primer paso: leer los PDFs y mostrar el contenido. No escribe nada."""
         if not self._comprobar_carpeta():
             return
-        if not self.var_simular.get():
-            if not messagebox.askyesno(
-                    APP_NAME,
-                    "Vas a INSERTAR registros REALES en el ERP Ninox.\n\n"
-                    "Las tablas destino son OD (BFI 05399610), PD (BFI 06074740) "
-                    "y TD (BFI 61020).\n"
-                    "En Ninox no hay transacciones ni deshacer.\n\n"
-                    "¿Continuar?"):
-                return
-        self._lanzar(self._tarea_procesar, "Procesando...")
+        self._lanzar(self._tarea_leer, "Leyendo los PDFs...")
 
     def _comprobar_carpeta(self) -> bool:
         if not self._directorio:
@@ -302,19 +343,37 @@ class AplicacionBFI(ttk.Frame):
         self._cola.put(("log", "Extraccion terminada: %d lineas en %s" % (len(filas), ruta)))
         self._cola.put(("estado", "CSV generado."))
 
-    def _tarea_procesar(self) -> None:
-        """Extrae, comprueba duplicados e inserta (o simula)."""
+    def _tarea_leer(self) -> None:
+        """Lee los PDFs y muestra el contenido. NO escribe en Ninox.
+
+        Es el primer paso, y el unico que hace falta para que el usuario vea lo
+        que hay antes de decidir nada. Ademas deja el CSV preparado.
+        """
         ruta = self._ruta_csv_destino()
         filas = procesar_pdfs(self._pdfs, ruta, aviso=self.logger.info)
         if not filas:
-            self._cola.put(("log", "El CSV no tiene ninguna linea: no hay nada que insertar."))
+            self._cola.put(("log", "Los PDFs no han producido ninguna linea."))
+            self._cola.put(("estado", "Sin lineas que procesar."))
             return
-
-        csv_filas = leer_csv(ruta)
-        grupos = agrupar_por_tabla(csv_filas)
+        grupos = agrupar_por_tabla(leer_csv(ruta))
         for tabla in sorted(grupos):
             self.logger.info("Cuenta -> %s: %d linea(s)",
                              config.TABLA_A_ETIQUETA.get(tabla, tabla), len(grupos[tabla]))
+        self._grupos = grupos
+        self._leido = True
+        self._cola.put(("tabla", grupos))
+        self._cola.put(("log", "Contenido leido: %d linea(s). El CSV esta en %s"
+                        % (len(filas), ruta)))
+        self._cola.put(("estado", "Contenido listo. Pulsa «Volcar a Ninox» para insertarlo."))
+        self._cola.put(("listo_para_volcar", len(filas)))
+
+    def _tarea_volcar(self) -> None:
+        """Comprueba duplicados e inserta (o simula) lo que ya se leyo."""
+        ruta = self._ruta_csv_destino()
+        if not self._leido or not self._grupos:
+            self._cola.put(("log", "No hay contenido leido. Pulsa antes «Leer PDFs»."))
+            return
+        grupos = {t: [dict(f) for f in filas] for t, filas in self._grupos.items()}
 
         # --- Conexion y deteccion de duplicados (solo lectura) ---
         self._cola.put(("estado", "Conectando con Ninox..."))
