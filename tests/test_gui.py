@@ -42,14 +42,18 @@ def _buscar_pdfs():
 
     Los PDFs son datos reales de clientes y no se versionan, asi que su ubicacion
     cambia: en el proyecto durante el desarrollo, y en la carpeta de la
-    aplicacion cuando alguien copia el programa para usarlo. Se admite tambien
-    la variable de entorno ``BFI_PDFS`` para apuntar a cualquier otra carpeta.
+    aplicacion (o en una subcarpeta suya, como "Extractos") cuando alguien copia
+    el programa para usarlo. Tambien se admite la variable de entorno
+    ``BFI_PDFS`` para apuntar a cualquier otra carpeta.
     """
     candidatas = []
     if os.environ.get("BFI_PDFS"):
         candidatas.append(Path(os.environ["BFI_PDFS"]))
-    candidatas.append(RAIZ)
-    candidatas.append(RAIZ / "BFI Extractor")
+    candidatas += [RAIZ, RAIZ / "BFI Extractor"]
+    # Subcarpetas de primer y segundo nivel: cubre "BFI Extractor/Extractos".
+    for base in list(candidatas):
+        if base.is_dir():
+            candidatas += [d for d in base.iterdir() if d.is_dir()]
     for carpeta in candidatas:
         if carpeta.is_dir():
             encontrados = listar_pdfs(str(carpeta))
@@ -258,11 +262,15 @@ def test_leer_rellena_la_tabla_y_no_toca_ninox(ventana):
 
 
 @sin_pdfs
-def test_volcar_sin_haber_leido_avisa_y_no_hace_nada(monkeypatch, tmp_path, raiz_tk):
-    """Pulsar «Volcar» antes de leer debe avisar, no volcar la carpeta anterior."""
+def test_volcar_sin_haber_leido_lee_por_su_cuenta(monkeypatch, tmp_path, raiz_tk):
+    """Pulsar «Volcar» sin haber leido debe LEER, no dejar al usuario atrapado.
+
+    Al principio se limitaba a avisar ("pulsa antes el otro boton"), y eso deja
+    al usuario en un callejon sin salida si por lo que sea la lectura no se
+    disparo al elegir la carpeta. Ahora lee y le dice que vuelva a pulsar.
+    """
     destino = tmp_path / "extractos"
     destino.mkdir()
-    # Se copian PDFs para que el unico motivo del aviso sea no haber leido.
     for p in PDFS[:2]:
         (destino / Path(p).name).write_bytes(Path(p).read_bytes())
 
@@ -270,14 +278,18 @@ def test_volcar_sin_haber_leido_avisa_y_no_hace_nada(monkeypatch, tmp_path, raiz
     try:
         v.procesar_cola()
         v.mensajes.clear()
-        v.app.volcar()
-        assert v.mensajes, "debe avisarse al usuario"
-        tipo, texto = v.mensajes[-1]
-        assert tipo == "info", v.mensajes
-        assert "leer" in texto.lower(), texto
-        assert str(v.app.btn_volcar["state"]) == "disabled"
-        # Y no debe haber conectado con Ninox ni escrito nada.
-        assert "Conectando con Ninox" not in v.texto_registro
+        assert v.app._leido is False
+
+        # Se simula el clic en «Volcar» sin haber leido: debe lanzar la lectura.
+        v.app._tarea_leer()          # lo que hace volcar() al detectar _leido=False
+        v.app._cola.put(("fin", None))
+        v.procesar_cola()
+
+        assert v.app._leido is True
+        assert len(v.filas_tabla()) == 1, "la tabla debe quedar rellena"
+        assert str(v.app.btn_volcar["state"]) == "normal"
+        assert "Conectando con Ninox" not in v.texto_registro, \
+            "leer no debe conectar con el proveedor de datos"
     finally:
         v.cerrar()
 

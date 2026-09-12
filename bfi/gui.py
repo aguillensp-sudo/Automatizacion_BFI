@@ -88,6 +88,9 @@ class AplicacionBFI(ttk.Frame):
         ttk.Button(marco1, text="Configurar acceso a Ninox...",
                    command=self.configurar_acceso).grid(row=2, column=0, sticky="w",
                                                         pady=(6, 0))
+        ttk.Button(marco1, text="Volver a leer esta carpeta",
+                   command=self.procesar).grid(row=2, column=1, sticky="w",
+                                               padx=6, pady=(6, 0))
 
         # --- 2. vista previa -------------------------------------------------
         marco2 = ttk.LabelFrame(self, text=" 2. Contenido detectado ", padding=8)
@@ -156,24 +159,30 @@ class AplicacionBFI(ttk.Frame):
         self._cola.put(("log", linea))
 
     def _vaciar_cola(self) -> None:
+        # Un error inesperado aqui no debe dejar la ventana sorda para siempre:
+        # se anota y se sigue vaciando la cola. Antes, una excepcion al pintar la
+        # tabla dejaba el bucle de mensajes muerto y la tabla vacia sin rastro.
         try:
             while True:
                 tipo, dato = self._cola.get_nowait()
-                if tipo == "log":
-                    self._escribir(dato)
-                elif tipo == "estado":
-                    self.lbl_estado.configure(text=dato)
-                elif tipo == "tabla":
-                    self._pintar_tabla(dato)
-                elif tipo == "listo_para_volcar":
-                    self.lbl_resumen.configure(
-                        text="Contenido leido: %d linea(s). Pulsa «Volcar a Ninox» "
-                             "cuando quieras insertarlas." % dato,
-                        foreground="#0b6e0b")
-                elif tipo == "popup":
-                    self._popup_pendiente = dato
-                elif tipo == "fin":
-                    self._al_terminar(dato)
+                try:
+                    if tipo == "log":
+                        self._escribir(dato)
+                    elif tipo == "estado":
+                        self.lbl_estado.configure(text=dato)
+                    elif tipo == "tabla":
+                        self._pintar_tabla(dato)
+                    elif tipo == "listo_para_volcar":
+                        self.lbl_resumen.configure(
+                            text="Contenido leido: %d linea(s). Pulsa «Volcar a Ninox» "
+                                 "cuando quieras insertarlas." % dato,
+                            foreground="#0b6e0b")
+                    elif tipo == "popup":
+                        self._popup_pendiente = dato
+                    elif tipo == "fin":
+                        self._al_terminar(dato)
+                except Exception as exc:            # noqa: BLE001
+                    self.logger.error("Fallo al mostrar el mensaje %r: %s", tipo, exc)
         except queue.Empty:
             pass
         self.after(120, self._vaciar_cola)
@@ -211,12 +220,15 @@ class AplicacionBFI(ttk.Frame):
 
     # ------------------------------------------------------------ acciones
     def elegir_carpeta(self) -> None:
+        self.logger.info("Abriendo el dialogo para elegir carpeta...")
         carpeta = filedialog.askdirectory(title="Selecciona la carpeta con los PDFs")
+        self.logger.info("Dialogo cerrado. Carpeta elegida: %r", carpeta)
         if not carpeta:
             return
         self._directorio = carpeta
         self.var_carpeta.set(carpeta)
         self._pdfs = listar_pdfs(carpeta)
+        self.logger.info("Encontrados %d fichero(s) .pdf.", len(self._pdfs))
         # Al cambiar de carpeta se olvida lo leido antes: si no, se volcaria el
         # contenido de la carpeta anterior.
         self._leido = False
@@ -230,7 +242,6 @@ class AplicacionBFI(ttk.Frame):
             messagebox.showwarning(APP_NAME,
                                    "En esa carpeta no hay ningun fichero .pdf.")
             return
-        self.logger.info("Carpeta: %s (%d PDF(s))", carpeta, len(self._pdfs))
         # Se leen YA, para que el usuario vea el contenido sin tener que pulsar
         # nada. Al principio solo se ponia un mensaje y la tabla seguia vacia
         # hasta pulsar «Procesar», lo que hacia dudar de si algo habia fallado.
@@ -238,6 +249,7 @@ class AplicacionBFI(ttk.Frame):
             text="%d fichero(s) PDF encontrados. Leyendo su contenido..."
                  % len(self._pdfs), foreground="#0b6e0b")
         self._lanzar(self._tarea_leer, "Leyendo los PDFs...")
+        self.logger.info("Lectura solicitada tras elegir la carpeta.")
 
     def _limpiar_tabla(self) -> None:
         for item in self.tabla.get_children():
@@ -253,10 +265,16 @@ class AplicacionBFI(ttk.Frame):
         if not self._comprobar_carpeta():
             return
         if not self._leido:
+            # En vez de pedirle al usuario que busque el boton correcto, se lee
+            # ahora y se le dice que vuelva a pulsar. Un callejon sin salida es
+            # peor que un paso extra.
+            self.logger.info("Se pulso «Volcar» sin haber leido: se lee primero.")
             messagebox.showinfo(
                 APP_NAME,
-                "Todavia no se ha leido el contenido de la carpeta.\n\n"
-                "Pulsa antes «Leer PDFs y mostrar el contenido».")
+                "Todavia no se ha leido el contenido de esta carpeta.\n\n"
+                "Se va a leer ahora. Cuando termine, vuelve a pulsar "
+                "«Volcar a Ninox».")
+            self._lanzar(self._tarea_leer, "Leyendo los PDFs...")
             return
         if not self.var_simular.get():
             if not messagebox.askyesno(
@@ -315,17 +333,26 @@ class AplicacionBFI(ttk.Frame):
 
     def _lanzar(self, tarea, estado: str) -> None:
         if self._hilo and self._hilo.is_alive():
+            # Si el hilo anterior sigue vivo, esta llamada se descartaba EN
+            # SILENCIO: el usuario pulsaba y no pasaba nada. Ahora se avisa.
+            self.logger.warning("Ya hay un proceso en marcha (%s): no se lanza %s.",
+                                getattr(tarea, "__name__", tarea), estado)
             messagebox.showinfo(APP_NAME, "Ya hay un proceso en marcha.")
             return
+        self.logger.info("Lanzando '%s'...", estado)
         self._ocupado(True, estado)
         self._hilo = threading.Thread(target=self._envolver, args=(tarea,), daemon=True)
         self._hilo.start()
+        self.logger.info("Hilo iniciado para '%s'.", estado)
 
     def _envolver(self, tarea) -> None:
+        nombre = getattr(tarea, "__name__", str(tarea))
+        self.logger.info("== Empieza %s ==", nombre)
         try:
             tarea()
+            self.logger.info("== Termina %s ==", nombre)
         except Exception as exc:                    # noqa: BLE001
-            self.logger.error("Fallo inesperado: %s", exc)
+            self.logger.error("Fallo inesperado en %s: %s", nombre, exc)
             self.logger.error(traceback.format_exc())
             self._cola.put(("log", "FALLO: %s" % exc))
             self._cola.put(("estado", "Terminado con errores."))
@@ -349,8 +376,10 @@ class AplicacionBFI(ttk.Frame):
         Es el primer paso, y el unico que hace falta para que el usuario vea lo
         que hay antes de decidir nada. Ademas deja el CSV preparado.
         """
+        self.logger.info("Leyendo %d PDF(s) de %s ...", len(self._pdfs), self._directorio)
         ruta = self._ruta_csv_destino()
         filas = procesar_pdfs(self._pdfs, ruta, aviso=self.logger.info)
+        self.logger.info("Extraccion terminada: %d linea(s).", len(filas))
         if not filas:
             self._cola.put(("log", "Los PDFs no han producido ninguna linea."))
             self._cola.put(("estado", "Sin lineas que procesar."))
@@ -362,6 +391,7 @@ class AplicacionBFI(ttk.Frame):
         self._grupos = grupos
         self._leido = True
         self._cola.put(("tabla", grupos))
+        self.logger.info("Tabla rellenada con %d tabla(s).", len(grupos))
         self._cola.put(("log", "Contenido leido: %d linea(s). El CSV esta en %s"
                         % (len(filas), ruta)))
         self._cola.put(("estado", "Contenido listo. Pulsa «Volcar a Ninox» para insertarlo."))
