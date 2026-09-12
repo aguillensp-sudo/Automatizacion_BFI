@@ -322,6 +322,75 @@ def test_volcar_sin_haber_leido_lee_por_su_cuenta(monkeypatch, tmp_path, raiz_tk
 
 
 # ---------------------------------------------------------------------------
+# Los mensajes deben decir la VERDAD de lo que hay en la carpeta
+# ---------------------------------------------------------------------------
+
+@sin_pdfs
+def test_el_aviso_de_confirmacion_solo_nombra_las_tablas_afectadas(
+        monkeypatch, tmp_path, raiz_tk):
+    """El aviso de escritura debe decir cuantos registros y en que tablas.
+
+    Fallo real que esto fija: el aviso estaba escrito a mano y nombraba SIEMPRE
+    las tres tablas, con DOS errores ademas (repetia PD y omitia TD), incluso
+    cuando la carpeta solo tenia un PDF de una unica tabla. Un aviso de escritura
+    en el ERP que informa mal es peor que no informar.
+    """
+    # Un unico PDF de la tabla TD.
+    elegido = next((p for p in PDFS if "061020" in Path(p).name), PDFS[0])
+    destino = tmp_path / "un-pdf"
+    destino.mkdir()
+    (destino / Path(elegido).name).write_bytes(Path(elegido).read_bytes())
+
+    v = VentanaDePrueba(monkeypatch, destino, raiz_tk)
+    try:
+        v.leer()
+        texto = v.app._resumen_a_confirmar()
+        tablas = list(v.app._grupos)
+        lineas = sum(len(f) for f in v.app._grupos.values())
+
+        assert "1 registro(s)" in texto, texto
+        for tabla in tablas:
+            assert config.TABLA_A_ETIQUETA[tabla] in texto
+        # No debe nombrar tablas que no se van a tocar.
+        for tabla, etiqueta in config.TABLA_A_ETIQUETA.items():
+            if tabla not in tablas and tabla != "DF":
+                assert etiqueta not in texto, \
+                    "el aviso nombra %s y esa tabla no se va a tocar:\n%s" % (tabla, texto)
+        assert texto.count("•") == len(tablas), \
+            "debe haber una linea por tabla afectada, no tres fijas"
+        assert "%d registro(s)" % lineas in texto
+    finally:
+        v.cerrar()
+
+
+@sin_pdfs
+def test_el_resumen_final_solo_nombra_las_tablas_afectadas(monkeypatch, tmp_path, raiz_tk):
+    """El informe final tampoco debe hablar de tablas que no se han tocado."""
+    elegido = next((p for p in PDFS if "061020" in Path(p).name), PDFS[0])
+    destino = tmp_path / "un-pdf"
+    destino.mkdir()
+    (destino / Path(elegido).name).write_bytes(Path(elegido).read_bytes())
+
+    v = VentanaDePrueba(monkeypatch, destino, raiz_tk)
+    try:
+        v.app.var_simular.set(True)
+        v.leer()
+        v.volcar()
+        tablas = list(v.app._grupos)
+        _tipo, texto = v.mensajes[-1]
+
+        assert "TOTAL:" in texto, "el resumen debe empezar por los totales"
+        assert "en 1 tabla(s)" in texto, texto
+        for tabla, etiqueta in config.TABLA_A_ETIQUETA.items():
+            if tabla not in tablas and tabla != "DF":
+                assert etiqueta not in texto, texto
+        assert "«Volcar a Ninox»" in texto, \
+            "el resumen debe nombrar el boton como se llama ahora"
+    finally:
+        v.cerrar()
+
+
+# ---------------------------------------------------------------------------
 # Paso 2: «Volcar» en modo simulacion recorre todo y NO escribe
 # ---------------------------------------------------------------------------
 
