@@ -47,24 +47,25 @@ Reglas adicionales (apartado 5.2, aplican a las tres tablas):
 
 | Regla | Implementación |
 |---|---|
-| `debito` informado → Egreso/Ingreso = Sí | `F` = `True` |
-| `credito` informado → Egreso/Ingreso = No | `F` = `False` |
+| `debito` informado → es un egreso | `F` = **`False`** (toggle **gris**, izquierda) |
+| `credito` informado → es un ingreso | `F` = **`True`** (toggle **azul**, derecha) |
 | Las dos columnas van al **mismo** campo de importe | `D` = débito si existe, si no crédito |
 | Oper. en tránsito = No | `O1` (OD) / `M1` (PD) / `Q1` (TD) = `"No"` |
 | Tipo de Cambio en blanco en OD y PD | el campo se **omite** (ver §6) |
 | `TD`: `J` = 24 y `C1` = blanco | `J` = `24`, `C1` = `""` |
 
-> ⚠ **Atención al significado del booleano `F` «Egreso/Ingreso»**, porque su
-> nombre induce a error. El Sí/No se refiere a **«Egreso»**, no a «Ingreso»:
+> ⚠ **El booleano `F` «Egreso/Ingreso»: mapeo verificado en Ninox el 12/09/2026.**
+> El apartado 5.2 del documento funcional decía lo contrario
+> («débito → Sí / crédito → No»), y **esa transcripción estaba invertida**.
+> Comprobado abriendo el registro y mirando el toggle:
 >
-> | Valor en Ninox | Significado | Origen en el CSV |
-> |---|---|---|
-> | `True` («Sí») | **es un egreso**: el dinero sale de la cuenta | `debito` informado |
-> | `False` («No») | **no es un egreso**, es decir, **es un ingreso** | `credito` informado |
+> | Valor en Ninox | Toggle | Significado | Origen en el CSV |
+> |---|---|---|---|
+> | `True` | **azul**, a la derecha | **Ingreso** (entra dinero) | `credito` informado |
+> | `False` | **gris**, a la izquierda | **Egreso** (sale dinero) | `debito` informado |
 >
-> Dicho de otro modo: **`True` = débito, `False` = crédito**. Un ingreso (crédito)
-> se guarda como `False` / «No». Está verificado contra la base real enviando un
-> crédito y comprobando que Ninox lo guarda como `False`.
+> Regla mnemotécnica: **azul = `True` = crédito/ingreso**, **gris = `False` =
+> débito/egreso**.
 
 ---
 

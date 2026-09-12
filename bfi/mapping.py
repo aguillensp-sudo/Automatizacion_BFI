@@ -16,8 +16,17 @@ Reglas que implementa (documento, apartados 5.1 y 5.2)
       saldo       -> "Saldo inicial"    (O)
 
 * Solo una de las dos columnas de importe viene informada; ambas van al mismo
-  campo. El campo que decide el signo es el booleano ``F`` "Egreso/Ingreso":
-  **debito -> True (Si)**, **credito -> False (No)**.
+  campo. El campo que decide el signo es el booleano ``F`` "Egreso/Ingreso",
+  y su equivalencia esta **VERIFICADA EN NINOX** el 12/09/2026 mirando el toggle
+  del campo junto al valor guardado que devuelve la API:
+
+      credito -> entra dinero -> **True**  -> toggle AZUL (derecha)  = Ingreso
+      debito  -> sale dinero  -> **False** -> toggle GRIS (izquierda) = Egreso
+
+  OJO: el apartado 5.2 del documento funcional decia "debito -> Si /
+  credito -> No", que es lo contrario. Se comprobo con el registro 768 de la
+  tabla DF: guardaba ``False`` y el toggle se veia GRIS (Egreso) siendo la fila
+  un ingreso. El usuario confirmo el mapeo de colores.
 * "Oper. en transito" se escribe siempre "No".
 * "Tipo de Cambio" no se toca en OD ni en PD. En TD se envia ``J`` = 24 y
   ``C1`` en blanco.
@@ -205,8 +214,36 @@ def _a_float(texto: Any) -> Optional[float]:
             return None
 
 
+def es_ingreso(fila: Dict[str, str]) -> Optional[bool]:
+    """?La fila es un ingreso (entra dinero) o un egreso (sale dinero)?
+
+    Mapeo **VERIFICADO EN NINOX** el 12/09/2026, con el usuario delante del
+    toggle y la API leyendo el valor guardado:
+
+        credito -> entra dinero -> toggle AZUL (derecha)  -> True
+        debito  -> sale dinero  -> toggle GRIS (izquierda) -> False
+
+    OJO: el apartado 5.2 del documento funcional decia lo contrario
+    ("debito -> Si / credito -> No"). Se comprobo que esa transcripcion estaba
+    invertida respecto a como funciona el campo en Ninox, y el usuario confirmo
+    mirando el toggle del registro 768 de DF: el campo guardaba False y el
+    toggle aparecia GRIS, es decir Egreso, siendo la fila un ingreso.
+    """
+    debito = _a_float(fila.get("debito"))
+    credito = _a_float(fila.get("credito"))
+    if debito is not None and credito is not None:
+        raise ErrorDeMapeo(
+            "La fila %r trae debito Y credito a la vez; no hay regla definida "
+            "para ese caso." % (fila.get("referencia") or fila.get("detalle")))
+    if credito is not None:
+        return True          # ingreso -> toggle azul
+    if debito is not None:
+        return False         # egreso  -> toggle gris
+    return None
+
+
 def importe_de_fila(fila: Dict[str, str]):
-    """Devuelve ``(importe, es_egreso)`` a partir de las columnas debito/credito.
+    """Devuelve ``(importe, es_ingreso)`` a partir de debito/credito.
 
     El documento garantiza que **al menos una** de las dos viene informada. Si
     las dos vinieran, se avisa al llamante mediante ``ErrorDeMapeo``: no hay
@@ -219,9 +256,9 @@ def importe_de_fila(fila: Dict[str, str]):
             "La fila %r trae debito Y credito a la vez; no hay regla definida "
             "para ese caso." % (fila.get("referencia") or fila.get("detalle")))
     if debito is not None:
-        return debito, True          # Egreso/Ingreso = Si
+        return debito, False
     if credito is not None:
-        return credito, False        # Egreso/Ingreso = No
+        return credito, True
     return None, None
 
 
@@ -260,11 +297,11 @@ def construir_payload(fila: Dict[str, str], mapeo: MapeoResuelto) -> Dict[str, A
     poner("factura", "")
 
     # --- Importe y signo ---
-    importe, es_egreso = importe_de_fila(fila)
+    importe, ingreso = importe_de_fila(fila)
     if importe is not None:
         poner("importe", importe)
-    if es_egreso is not None:
-        poner("egreso_ingreso", es_egreso)
+    if ingreso is not None:
+        poner("egreso_ingreso", ingreso)
 
     saldo = _a_float(fila.get("saldo"))
     if saldo is not None:
@@ -301,12 +338,12 @@ def clave_duplicado(fila: Dict[str, str]) -> tuple:
     entra en la clave porque hay extractos con la misma referencia repetida
     (varias lineas de una misma operacion).
     """
-    importe, es_egreso = importe_de_fila(fila)
+    importe, es_ingreso = importe_de_fila(fila)
     return (
         (fila.get("referencia") or "").strip(),
         (fila.get("fecha_valor") or "").strip(),
         round(importe, 2) if importe is not None else None,
-        es_egreso,
+        es_ingreso,
     )
 
 
