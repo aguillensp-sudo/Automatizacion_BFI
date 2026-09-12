@@ -126,14 +126,25 @@ def test_una_cuenta_desconocida_aborta():
 # ---------------------------------------------------------------------------
 
 def test_debito_es_egreso_y_credito_es_ingreso():
+    """Deja escrito, sin ambiguedad, que significa el booleano.
+
+    El nombre del campo ("Egreso/Ingreso") invita a confundirse: el Si/No se
+    refiere a **Egreso**, no a Ingreso. Por eso se comprueba aqui de forma
+    explicita, porque el usuario llego a dudar de si estaba invertido.
+
+        debito  -> sale dinero  -> es egreso -> True  ("Si")
+        credito -> entra dinero -> no es egreso -> False ("No")
+    """
     m = resolver_mapeo("OD", CAMPOS_OD)
     p = construir_payload(fila(debito="43918.88", credito=""), m)
     assert p["fields"]["Importe CUP"] == 43918.88
-    assert p["fields"]["Egreso/Ingreso"] is True
+    assert p["fields"]["Egreso/Ingreso"] is True, \
+        "un debito (sale dinero) es un EGRESO: True = Si"
 
     p = construir_payload(fila(debito="", credito="500.25"), m)
     assert p["fields"]["Importe CUP"] == 500.25
-    assert p["fields"]["Egreso/Ingreso"] is False
+    assert p["fields"]["Egreso/Ingreso"] is False, \
+        "un credito (entra dinero) NO es un egreso: False = No"
 
 
 def test_debito_y_credito_a_la_vez_es_un_error():
