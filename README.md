@@ -309,14 +309,25 @@ bfi/
   dialogo_credenciales.py    cuadro de dialogo de acceso a Ninox
   gui.py                     ventana principal (tkinter)
   logging_setup.py           registro a fichero y a la ventana
+bfi_agente/                  AGENTE DE CORREO (ver docs/AGENTE_CORREO.md)
+  cli.py                     linea de comandos (--dry-run, --real, --comprobar...)
+  config.py                  lectura y validacion de agente_correo.json
+  pipeline.py                orquesta una pasada completa
+  procesador.py              puente con extractor/mapping/ninox_writer
+  estado.py                  SQLite: correos y adjuntos ya procesados
+  resumen.py                 informe de la pasada y correo de resumen
+  correo/                    fuentes de correo (Outlook por COM y simulada)
 main.py                      interfaz grafica y linea de comandos
 build_exe.bat                compila la aplicacion (desarrollador)
 crear_instalador.bat         empaqueta el instalador unico (desarrollador)
 instalar.bat                 lo que ejecuta el instalador en el equipo destino
+programar_agente.bat         registra la tarea del lunes (agente de correo)
+ejecutar_agente.cmd          lo que ejecuta esa tarea
 tools/                       sondas de verificacion contra la API (ver docs)
   bfi_extractor_original.py  el extractor de partida, conservado como referencia
 tests/                       pruebas de la logica de negocio
 docs/VERIFICACION_ESCRITURA.md   que se comprobo contra la base real
+docs/AGENTE_CORREO.md            agente de correo: configuracion y limitaciones
 ```
 
 > **Los `.bat` van en ASCII con finales de línea CRLF**, y no es un capricho: con
@@ -340,6 +351,37 @@ mirar**: contiene cada línea enviada, cada error HTTP y cada corrección.
 * Conexión a Internet para el volcado a Ninox (que es un servicio en la nube).
 * Credenciales de la API de Ninox con permiso de escritura sobre `OD`, `PD` y
   `TD`.
+
+### Requisitos adicionales del agente de correo
+
+* El **Outlook clásico** instalado y con el perfil de correo configurado (la
+  aplicación nueva de la Store no expone COM).
+* `pywin32` (`pip install pywin32`).
+* Una **sesión de Windows iniciada** a la hora de la ejecución.
+
+Detalles en `docs/AGENTE_CORREO.md`.
+
+---
+
+## 10. Agente de correo
+
+`bfi_agente` revisa cada lunes una carpeta del Outlook de este equipo, descarga
+los adjuntos, los procesa con **el mismo pipeline** que la ventana y manda un
+correo de resumen:
+
+```bat
+python -m bfi_agente --comprobar        :: revisa Outlook, carpeta y Ninox
+python -m bfi_agente --listar-carpetas  :: nombres reales de las carpetas
+python -m bfi_agente --dry-run          :: ensayo, sin escribir en Ninox
+python -m bfi_agente --real             :: ejecucion de verdad
+```
+
+Se instala con `programar_agente.bat` (tarea semanal del lunes a las 07:00). Por
+defecto **no se envía ningún correo** ni se mueve nada hasta que se configura.
+
+> **Por qué no se usa Microsoft Graph:** la suscripción es personal, así que no
+> existe inquilino de Entra ID donde registrar la aplicación. Ver el apartado 1
+> de `docs/AGENTE_CORREO.md`.
 
 ---
 

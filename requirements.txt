@@ -7,5 +7,11 @@
 # criterio y por eso su .exe se empaqueta sin problemas.)
 pdfplumber>=0.11.0
 
+# Solo para el AGENTE DE CORREO (carpeta bfi_agente), que habla con el Outlook
+# clasico de este equipo. La aplicacion de escritorio NO lo necesita, y no se
+# incluye en el instalador: se instala aparte, en la maquina que ejecuta el
+# agente.
+#   pip install pywin32
+
 # Solo para el desarrollo y el empaquetado (no van dentro del instalador final):
 #   pip install pyinstaller pytest

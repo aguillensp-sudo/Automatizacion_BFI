@@ -1,0 +1,18 @@
+{
+  "carpeta_outlook": "Bandeja de entrada/BFI",
+  "carpeta_procesados": "",
+  "categoria_procesada": "Procesado BFI",
+  "remitentes_permitidos": [],
+  "patron_adjunto": "(?i)\\.pdf$",
+  "patron_asunto": "",
+  "dias_atras": 8,
+  "max_correos": 0,
+  "evitar_adjuntos_repetidos": true,
+  "carpeta_trabajo": "logs/trabajo",
+  "ruta_estado": "logs/agente_bfi.sqlite3",
+  "resumen_activo": false,
+  "resumen_para": [],
+  "resumen_solo_simular": false,
+  "responder_al_remitente": false,
+  "texto_respuesta": "Los registros han sido insertados en Ninox"
+}

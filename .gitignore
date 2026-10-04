@@ -37,9 +37,19 @@ credenciales*.txt
 # terceros (cuentas, importes, beneficiarios). No se publican, igual que el CSV
 # que se genera a partir de ellos. Se quedan en el disco de quien los procesa.
 *.pdf
+# Carpeta de ensayos del agente de correo: correos de ejemplo con extractos
+# reales dentro. Se recrea con las instrucciones de docs/AGENTE_CORREO.md.
+pruebas/
+# Carpetas temporales de las pruebas. No se usan las del sistema: en equipos con
+# politicas estrictas (y en el sandbox del harness) no siempre son escribibles.
+tests/_tmp/
 # La carpeta de la aplicacion compilada (el .exe, _internal con las DLL y las
 # Tcl/Tk, los logs y el CSV). Son ~1100 archivos de binarios reproducibles con
 # build_exe.bat: no se versionan. Se colaron una vez por error.
 BFI Extractor/
 # Datos reales del cliente: cuenta -> tabla. Plantilla en cuentas.example.json
 cuentas.json
+
+# Configuracion local del agente de correo (la plantilla versionada es agente_correo.ejemplo.json)
+agente_correo.json
+agente_correo.prueba.json
