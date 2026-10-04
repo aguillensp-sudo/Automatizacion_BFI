@@ -340,3 +340,19 @@ mirar**: contiene cada línea enviada, cada error HTTP y cada corrección.
 * Conexión a Internet para el volcado a Ninox (que es un servicio en la nube).
 * Credenciales de la API de Ninox con permiso de escritura sobre `OD`, `PD` y
   `TD`.
+
+---
+
+## Configuración de cuentas (datos del cliente)
+
+Los números de cuenta reales no están en el repositorio. Los de este código y de la
+documentación son ficticios (`0300000000000001`…). Para usar la aplicación con las cuentas
+reales, copia `cuentas.example.json` a `cuentas.json`, rellénalo y colócalo en una de estas
+rutas (se busca en este orden):
+
+1. la que indique la variable de entorno `BFI_CUENTAS_FILE`;
+2. `%APPDATA%\BFI Extractor\cuentas.json`;
+3. junto al ejecutable (o en la raíz del proyecto si se ejecuta desde el código fuente).
+
+`cuentas.json` está en `.gitignore`. Sin él, la aplicación se detiene ante cualquier cuenta
+desconocida en lugar de escribir en una tabla equivocada.

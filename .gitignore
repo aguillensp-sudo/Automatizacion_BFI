@@ -41,3 +41,5 @@ credenciales*.txt
 # Tcl/Tk, los logs y el CSV). Son ~1100 archivos de binarios reproducibles con
 # build_exe.bat: no se versionan. Se colaron una vez por error.
 BFI Extractor/
+# Datos reales del cliente: cuenta -> tabla. Plantilla en cuentas.example.json
+cuentas.json

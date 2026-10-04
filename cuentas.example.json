@@ -1,0 +1,12 @@
+{
+  "cuentas": {
+    "0300000000000001": "OD",
+    "0300000000000002": "PD",
+    "0300000000000003": "TD"
+  },
+  "etiquetas": {
+    "OD": "OD - nombre legible de la tabla",
+    "PD": "PD - nombre legible de la tabla",
+    "TD": "TD - nombre legible de la tabla"
+  }
+}

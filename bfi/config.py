@@ -7,6 +7,11 @@ Ninox. Ese mapa es la traduccion literal del apartado 5.1.1 del documento
 """
 from __future__ import annotations
 
+import json
+import os
+import sys
+from pathlib import Path
+
 # ---------------------------------------------------------------------------
 # Ninox (API REST v1) — endpoints verificados en el proyecto hermano JI
 # ---------------------------------------------------------------------------
@@ -27,19 +32,52 @@ RETRY_BACKOFF_SEC = 1.0
 # Mapa de negocio: numero de cuenta del extracto -> tabla Ninox destino
 # ---------------------------------------------------------------------------
 # Documento, apartado 5.1.1.
-CUENTA_A_TABLA = {
+#
+# Los numeros de cuenta reales NO se versionan: son datos del cliente. Viven en
+# un fichero local ``cuentas.json`` (ver ``cuentas.example.json``) que se busca,
+# por este orden, en: la variable de entorno ``BFI_CUENTAS_FILE``;
+# ``%APPDATA%\BFI Extractor\cuentas.json``; y junto al ejecutable (o a la raiz
+# del proyecto si se ejecuta desde el codigo fuente). Si no existe ninguno, se usan
+# las cuentas ficticias de demostracion de abajo: ninguna cuenta real coincide, y
+# ``mapping.agrupar_por_tabla`` aborta con un mensaje claro en lugar de escribir.
+ENV_CUENTAS_FILE = "BFI_CUENTAS_FILE"
+
+_CUENTAS_DEMO = {
     "0300000000000001": "OD",
     "0300000000000002": "PD",
     "0300000000000003": "TD",
 }
-
-# Nombre legible de cada tabla, solo para los mensajes al usuario final.
-TABLA_A_ETIQUETA = {
-    "OD": "OD — BFI 00000001",
-    "PD": "PD — BFI 00000002",
-    "TD": "TD — BFI 00000003",
-    "DF": "DF — BFI 00000004 (TEST)",
+_ETIQUETAS_DEMO = {
+    "OD": "OD - cuenta 1",
+    "PD": "PD - cuenta 2",
+    "TD": "TD - cuenta 3",
+    "DF": "DF - tabla de pruebas",
 }
+
+
+def _rutas_cuentas():
+    rutas = []
+    if os.environ.get(ENV_CUENTAS_FILE):
+        rutas.append(Path(os.environ[ENV_CUENTAS_FILE]))
+    if os.environ.get("APPDATA"):
+        rutas.append(Path(os.environ["APPDATA"]) / "BFI Extractor" / "cuentas.json")
+    base = Path(sys.executable).parent if getattr(sys, "frozen", False)         else Path(__file__).resolve().parent.parent
+    rutas.append(base / "cuentas.json")
+    return rutas
+
+
+def _cargar_cuentas():
+    """Devuelve (cuentas, etiquetas, origen). ``origen`` es la ruta usada o ``None``."""
+    for ruta in _rutas_cuentas():
+        if ruta.is_file():
+            datos = json.loads(ruta.read_text(encoding="utf-8"))
+            cuentas = dict(datos["cuentas"])
+            etiquetas = {**_ETIQUETAS_DEMO, **datos.get("etiquetas", {})}
+            return cuentas, etiquetas, str(ruta)
+    return dict(_CUENTAS_DEMO), dict(_ETIQUETAS_DEMO), None
+
+
+CUENTA_A_TABLA, TABLA_A_ETIQUETA, CUENTAS_ORIGEN = _cargar_cuentas()
 
 # Tabla autorizada para pruebas. Nunca se escriben datos reales en ella.
 TABLA_TEST = "DF"
